@@ -1,0 +1,1993 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nebula簡単操作</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --surface2: #0f3460;
+    --accent: #e94560;
+    --text: #eaeaea;
+    --text-muted: #888;
+    --success: #4caf50;
+    --error: #f44336;
+    --warn: #ff9800;
+    --radius: 8px;
+  }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    background: var(--surface2);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    border-bottom: 2px solid var(--accent);
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 1.3rem; letter-spacing: 2px; color: var(--accent); flex-shrink: 0; }
+
+  /* 現在の設定サマリー（ヘッダー内） */
+  #cfg-summary {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    flex: 1;
+    overflow: hidden;
+  }
+  .cfg-chip {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 20px;
+    padding: 3px 10px;
+    font-size: 0.75rem;
+    max-width: 280px;
+    overflow: hidden;
+  }
+  .cfg-chip .chip-label { color: var(--text-muted); white-space: nowrap; }
+  .cfg-chip .chip-value {
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cfg-chip .chip-value.missing { color: var(--error); font-style: italic; }
+
+  .layout {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+  nav {
+    width: 200px;
+    background: var(--surface);
+    padding: 8px 0;
+    flex-shrink: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    transition: width 0.22s ease;
+  }
+  nav.collapsed { width: 52px; }
+
+  nav .section-label {
+    font-size: 0.7rem;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    padding: 8px 12px 4px;
+    text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  nav button {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    background: none;
+    border: none;
+    color: var(--text);
+    cursor: pointer;
+    font-size: 0.9rem;
+    border-left: 3px solid transparent;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  nav button:hover { background: var(--surface2); }
+  nav button.active { border-left-color: var(--accent); background: var(--surface2); color: var(--accent); }
+  nav .nav-icon { flex-shrink: 0; width: 1.4em; text-align: center; margin-right: 6px; font-size: 1.05rem; }
+  nav .nav-text { overflow: hidden; transition: max-width 0.22s ease, opacity 0.22s ease; max-width: 200px; opacity: 1; }
+  nav.collapsed .nav-text { max-width: 0; opacity: 0; }
+
+  .nav-hamburger {
+    display: flex !important;
+    align-items: center;
+    justify-content: flex-start !important;
+    width: fit-content !important;
+    padding: 8px 12px !important;
+    font-size: 1.1rem !important;
+    border-left: none !important;
+    border-bottom: none !important;
+    color: var(--text-muted) !important;
+    margin-bottom: 4px;
+    border-radius: 4px;
+  }
+  .nav-hamburger > span { display: inline-block; width: 1.4em; text-align: center; }
+  .nav-hamburger:hover { color: var(--text) !important; background: var(--surface2) !important; }
+
+  /* スクロールバー */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.45); }
+  main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .panels { flex: 1; display: flex; overflow: hidden; }
+  .form-panel {
+    width: clamp(300px, 38%, 460px);
+    padding: 0;
+    overflow: hidden;
+    border-right: 1px solid #333;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .form-panel > :not(.page) { padding: 0 20px; }
+  .page { padding: 20px; }
+  /* 通常ページはスクロールなし、サーバー一覧ページのみ内部スクロール */
+  .page { display: none; overflow: hidden; }
+  .page.active { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; }
+  .log-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 180px; }
+
+  .resizer {
+    width: 5px;
+    background: var(--border);
+    cursor: col-resize;
+    flex-shrink: 0;
+    transition: background 0.15s;
+    position: relative;
+    z-index: 10;
+  }
+  .resizer:hover, .resizer.dragging { background: var(--accent); }
+
+  /* 幅が狭い時はログパネルを隠す */
+  @media (max-width: 780px) {
+    .log-panel { display: none; }
+    .log-panel.log-open { display: flex; position: fixed; inset: 0; z-index: 200; background: var(--bg); flex-direction: column; }
+    .form-panel { width: 100%; border-right: none; }
+    #log-fab { display: flex !important; }
+  }
+  #log-fab {
+    display: none;
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    z-index: 210;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 24px;
+    padding: 10px 16px;
+    font-size: 0.85rem;
+    font-weight: bold;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    align-items: center;
+    gap: 6px;
+  }
+  /* ナビをアイコン幅に縮小 */
+  @media (max-width: 600px) {
+    nav { width: 44px; min-width: 44px; padding: 8px 0; }
+    nav .section-label { display: none; }
+    nav button { padding: 10px; font-size: 1rem; text-align: center; border-left: none; border-bottom: 3px solid transparent; }
+    nav button.active { border-bottom-color: var(--accent); border-left-color: transparent; }
+  }
+  .log-toolbar {
+    padding: 8px 16px;
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid #333;
+  }
+  .log-toolbar span { font-size: 0.85rem; color: var(--text-muted); flex: 1; }
+  #log-output {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px;
+    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.8rem;
+    line-height: 1.6;
+    background: #0d1117;
+  }
+  .log-entry { white-space: pre-wrap; word-break: break-all; }
+  .log-entry.info { color: #58a6ff; }
+  .log-entry.error { color: #f85149; }
+  .log-entry.warn { color: #e3b341; }
+  .log-entry.debug { color: #8b949e; }
+  .log-entry.done-ok { color: var(--success); font-weight: bold; }
+  .log-entry.done-fail { color: var(--error); font-weight: bold; }
+
+  h2 { font-size: 1.1rem; margin-bottom: 16px; color: var(--accent); }
+  .form-group { margin-bottom: 14px; }
+  label { display: block; font-size: 0.82rem; color: var(--text-muted); margin-bottom: 4px; }
+  input[type="text"] {
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--surface2);
+    border: 1px solid #444;
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  input:focus { border-color: var(--accent); }
+  .checkbox-group { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+  .checkbox-group input { width: auto; }
+  .checkbox-group label { margin: 0; color: var(--text); }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 18px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: opacity 0.15s;
+    margin-top: 8px;
+  }
+  .btn:hover { opacity: 0.85; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-secondary { background: var(--surface2); border: 1px solid #555; }
+  .hint { font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--text-muted);
+    display: inline-block;
+    margin-right: 4px;
+  }
+  .status-dot.running { background: var(--warn); animation: pulse 1s infinite; }
+  .status-dot.ok { background: var(--success); }
+  .status-dot.fail { background: var(--error); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .note {
+    background: #1e2a1e;
+    border-left: 3px solid var(--success);
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    font-size: 0.82rem;
+    color: #aaa;
+    margin-bottom: 14px;
+  }
+  .note.warn { background: #2a1e00; border-left-color: var(--warn); }
+
+  /* 現在の設定 読み取り専用カード */
+  .current-config-card {
+    background: var(--surface2);
+    border: 1px solid #345;
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 20px;
+  }
+  .current-config-card h3 {
+    font-size: 0.78rem;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+  .cfg-row {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    margin-bottom: 6px;
+    font-size: 0.82rem;
+  }
+  .cfg-row:last-child { margin-bottom: 0; }
+  .cfg-row .key { color: var(--text-muted); flex-shrink: 0; width: 130px; }
+  .cfg-row .val {
+    color: var(--text);
+    word-break: break-all;
+    font-family: 'Consolas', monospace;
+    font-size: 0.78rem;
+  }
+  .cfg-row .val.missing { color: var(--error); font-style: italic; font-family: inherit; }
+  .divider { border: none; border-top: 1px solid #333; margin: 18px 0; }
+
+  /* Forge 結果カード */
+  /* サーバーカード */
+  .server-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+    padding-right: 4px;
+  }
+  .server-card {
+    background: var(--surface);
+    border: 1px solid #334;
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    transition: border-color 0.15s;
+  }
+  .server-card:hover { border-color: var(--accent); }
+  .server-card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .server-icon {
+    width: 36px; height: 36px;
+    border-radius: 6px;
+    background: var(--surface2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.2rem;
+    flex-shrink: 0;
+  }
+  .server-name { font-weight: 600; font-size: 0.95rem; }
+  .server-desc { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }
+  .server-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 8px;
+  }
+  .tag {
+    font-size: 0.72rem;
+    padding: 2px 7px;
+    border-radius: 4px;
+    border: 1px solid #445;
+    background: var(--surface2);
+    color: var(--text-muted);
+    font-family: 'Consolas', monospace;
+  }
+  .tag.forge { border-color: #c67c3a; color: #e09050; }
+  .tag.fabric { border-color: #4a8a6a; color: #6db890; }
+  .tag.main { border-color: var(--accent); color: var(--accent); }
+  .server-folder {
+    font-size: 0.72rem;
+    color: #666;
+    font-family: 'Consolas', monospace;
+    margin-top: 6px;
+  }
+  .empty-state {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 40px 0;
+    font-size: 0.9rem;
+  }
+  .servers-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .servers-count { font-size: 0.82rem; color: var(--text-muted); }
+
+  .result-card {
+    display: none;
+    margin-top: 16px;
+    background: #0d2010;
+    border: 1px solid var(--success);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+  }
+  .result-card.visible { display: block; }
+  .result-card .result-label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; }
+  .result-card .result-version {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--success);
+    font-family: 'Consolas', monospace;
+    letter-spacing: 1px;
+  }
+  .result-card .result-type { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
+
+  /* ===== サーバー詳細ビュー ===== */
+  /* 詳細はform-panelを全幅オーバーレイで覆う */
+  .detail-overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: var(--bg);
+    z-index: 100;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .detail-overlay.open { display: flex; }
+
+  .detail-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    background: var(--surface2);
+    border-bottom: 1px solid #333;
+    flex-shrink: 0;
+  }
+  .detail-header .back-btn {
+    background: none; border: 1px solid #555; color: var(--text);
+    border-radius: var(--radius); padding: 5px 12px; cursor: pointer;
+    font-size: 0.82rem; display: flex; align-items: center; gap: 4px;
+  }
+  .detail-header .back-btn:hover { background: var(--surface); }
+  .detail-server-name { font-weight: 700; font-size: 1rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .detail-loader-tag { font-size: 0.72rem; padding: 2px 8px; border-radius: 4px; }
+
+  /* タブ */
+  .detail-tabs {
+    display: flex;
+    border-bottom: 1px solid #333;
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+  .detail-tab {
+    padding: 10px 18px;
+    font-size: 0.85rem;
+    border: none; background: none; color: var(--text-muted);
+    cursor: pointer; border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .detail-tab:hover { color: var(--text); }
+  .detail-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .detail-body {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .detail-tab-content {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    padding: 18px 20px;
+    flex-direction: column;
+    gap: 0;
+  }
+  .detail-tab-content.active { display: flex; }
+
+  /* 設定タブ */
+  .detail-form-group { margin-bottom: 12px; }
+  .detail-form-group label { font-size: 0.78rem; color: var(--text-muted); display: block; margin-bottom: 3px; }
+  .detail-form-group input[type="text"] { width: 100%; }
+  .detail-form-group .checkbox-group { padding: 2px 0; }
+
+  /* ファイル管理タブ */
+  .file-category {
+    margin-bottom: 16px;
+  }
+  .file-category-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+    margin-bottom: 6px;
+    border-bottom: 1px solid #2a2a3e;
+  }
+  .file-category-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .file-upload-btn {
+    font-size: 0.72rem; padding: 3px 10px; margin: 0;
+    background: var(--surface2); border: 1px solid #555;
+    color: var(--text); border-radius: 4px; cursor: pointer;
+  }
+  .file-upload-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .file-sub-section { margin-bottom: 8px; }
+  .file-sub-label {
+    font-size: 0.7rem; color: var(--text-muted); margin-bottom: 4px;
+    padding: 2px 6px; background: var(--surface2); border-radius: 3px;
+    display: inline-block;
+  }
+
+  .file-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    background: var(--surface);
+    margin-bottom: 3px;
+    font-size: 0.78rem;
+    cursor: grab;
+    user-select: none;
+  }
+  .file-item:hover { background: #1e2040; }
+  .file-item.dragging { opacity: 0.4; cursor: grabbing; }
+  .file-sub-section.drag-target { outline: 2px dashed var(--accent); outline-offset: 2px; background: rgba(233,69,96,0.05); border-radius: var(--radius); }
+  .file-item-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: 'Consolas', monospace;
+  }
+  .file-item-size { color: var(--text-muted); font-size: 0.68rem; flex-shrink: 0; }
+  .file-action-btn {
+    border: none; background: none; cursor: pointer;
+    font-size: 0.78rem; padding: 2px 6px; border-radius: 3px;
+    transition: background 0.12s; flex-shrink: 0;
+  }
+  .file-action-btn.del { color: var(--error); }
+  .file-action-btn.del:hover { background: rgba(244,67,54,0.15); }
+  .file-action-btn.move { color: var(--text-muted); }
+  .file-action-btn.move:hover { background: var(--surface2); color: var(--text); }
+
+  .file-empty { font-size: 0.78rem; color: #555; padding: 6px 0; }
+
+  /* ドロップゾーン */
+  .drop-zone {
+    border: 2px dashed #334;
+    border-radius: var(--radius);
+    padding: 12px;
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    margin-top: 6px;
+  }
+  .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); color: var(--accent); background: rgba(233,69,96,0.05); }
+
+</style>
+</head>
+<body>
+
+<!-- アップデート通知バナー -->
+<div id="update-banner" style="display:none;background:#1a5c2e;color:#e0ffe0;padding:8px 16px;font-size:0.85rem;display:none;align-items:center;gap:12px;justify-content:space-between;border-bottom:1px solid #2d8a4e;">
+  <span id="update-banner-msg"></span>
+  <div style="display:flex;gap:8px;flex-shrink:0;">
+    <div id="update-progress-wrap" style="display:none;align-items:center;gap:8px;">
+      <div style="width:140px;height:6px;background:rgba(255,255,255,0.2);border-radius:3px;overflow:hidden;">
+        <div id="update-progress-bar" style="height:100%;width:0%;background:#4caf50;border-radius:3px;transition:width 0.3s;"></div>
+      </div>
+      <span id="update-progress-pct" style="font-size:0.8rem;">0%</span>
+    </div>
+    <button id="update-dismiss" onclick="document.getElementById('update-banner').style.display='none'" style="background:none;border:1px solid rgba(255,255,255,0.4);color:#e0ffe0;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:0.8rem;">✕</button>
+  </div>
+</div>
+
+<header>
+  <h1 style="display:flex;align-items:center;gap:8px;"><img src="/icon.png" style="width:32px;height:32px;object-fit:contain;image-rendering:pixelated;border-radius:4px;flex-shrink:0;"> NEUS<span id="app-version" style="font-size:0.75rem;font-weight:400;color:var(--text-muted);align-self:flex-end;margin-bottom:3px;"></span></h1>
+  <div id="cfg-summary">
+    <div class="cfg-chip">
+      <span class="chip-label">ROOT</span>
+      <span class="chip-value missing" id="hdr-root">未設定</span>
+    </div>
+    <div class="cfg-chip">
+      <span class="chip-label">BASE URL</span>
+      <span class="chip-value missing" id="hdr-baseurl">未設定</span>
+    </div>
+    <div class="cfg-chip">
+      <span class="chip-label">Java</span>
+      <span class="chip-value missing" id="hdr-java">未設定</span>
+    </div>
+  </div>
+  <button onclick="resetPanelWidths()" title="パネル幅をリセット" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 10px;border-radius:4px;cursor:pointer;font-size:0.75rem;white-space:nowrap;flex-shrink:0;">↔ リセット</button>
+</header>
+
+<div class="layout">
+  <nav id="sidebar">
+    <button class="nav-hamburger" onclick="toggleNav()" title="メニューを折りたたむ"><span>☰</span></button>
+    <div class="section-label">設定</div>
+    <button onclick="showPage('config')" class="active" id="nav-config"><span class="nav-icon">⚙</span><span class="nav-text"> 環境設定</span></button>
+    <div class="section-label">概要</div>
+    <button onclick="showPage('servers');loadServers()" id="nav-servers"><span class="nav-icon">📋</span><span class="nav-text"> サーバー一覧</span></button>
+    <div class="section-label">初期化</div>
+    <button onclick="showPage('init-root')" id="nav-init-root"><span class="nav-icon">📁</span><span class="nav-text"> Init Root</span></button>
+    <div class="section-label">生成</div>
+    <button onclick="showPage('gen-server')" id="nav-gen-server"><span class="nav-icon">🖥</span><span class="nav-text"> サーバー生成</span></button>
+    <button onclick="showPage('gen-curseforge')" id="nav-gen-curseforge"><span class="nav-icon">🔮</span><span class="nav-text"> CurseForge から生成</span></button>
+    <button onclick="showPage('gen-distro')" id="nav-gen-distro"><span class="nav-icon">📦</span><span class="nav-text"> Distribution 生成</span></button>
+    <button onclick="showPage('gen-schemas')" id="nav-gen-schemas"><span class="nav-icon">📄</span><span class="nav-text"> スキーマ生成</span></button>
+    <div class="section-label">情報</div>
+    <button onclick="showPage('forge-info')" id="nav-forge-info"><span class="nav-icon">🔨</span><span class="nav-text"> Forge バージョン確認</span></button>
+    <button onclick="showPage('fabric-info')" id="nav-fabric-info"><span class="nav-icon">🧵</span><span class="nav-text"> Fabric バージョン確認</span></button>
+    <div class="section-label">連携</div>
+    <button onclick="showPage('github');loadGitPage()" id="nav-github"><span class="nav-icon">🐙</span><span class="nav-text"> GitHub 連携</span></button>
+  </nav>
+
+  <main>
+    <div class="panels" style="position:relative;">
+
+      <!-- ===== サーバー詳細オーバーレイ ===== -->
+      <div class="detail-overlay" id="detail-overlay">
+        <div class="detail-header">
+          <button class="back-btn" onclick="closeDetail()">← 戻る</button>
+          <span class="detail-server-name" id="detail-server-name"></span>
+          <span class="detail-loader-tag tag" id="detail-loader-tag"></span>
+          <button class="back-btn" onclick="openExplorer()" title="エクスプローラーで開く">📂 開く</button>
+        </div>
+        <div class="detail-tabs">
+          <button class="detail-tab active" onclick="switchDetailTab('settings',this)">⚙ 設定</button>
+          <button class="detail-tab" onclick="switchDetailTab('forgemods',this)">🔨 ForgeMods</button>
+          <button class="detail-tab" onclick="switchDetailTab('fabricmods',this)">🧵 FabricMods</button>
+          <button class="detail-tab" onclick="switchDetailTab('files',this)">📄 Files</button>
+          <button class="detail-tab" onclick="switchDetailTab('libraries',this)">📚 Libraries</button>
+        </div>
+        <div class="detail-body">
+
+          <!-- 設定タブ -->
+          <div class="detail-tab-content active" id="dtab-settings">
+            <div class="detail-form-group">
+              <label>サーバー名</label>
+              <input type="text" id="d-name" placeholder="My Server">
+            </div>
+            <div class="detail-form-group">
+              <label>説明</label>
+              <input type="text" id="d-desc" placeholder="説明">
+            </div>
+            <div class="detail-form-group">
+              <label>アドレス</label>
+              <input type="text" id="d-address" placeholder="localhost:25565">
+            </div>
+            <div class="detail-form-group">
+              <label>バージョン</label>
+              <input type="text" id="d-version" placeholder="1.0.0">
+            </div>
+            <div class="detail-form-group">
+              <div class="checkbox-group">
+                <input type="checkbox" id="d-main">
+                <label for="d-main">メインサーバーに設定</label>
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="d-autoconnect">
+                <label for="d-autoconnect">自動接続</label>
+              </div>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <button class="btn" onclick="saveServerMeta()">💾 保存</button>
+                <span id="meta-saved" style="display:none;color:var(--success);font-size:0.82rem;">✓ 保存しました</span>
+              </div>
+              <button class="btn" style="background:#7a1a1a;border:1px solid #c0392b;margin:0" onclick="deleteServer()">🗑 削除</button>
+            </div>
+          </div>
+
+          <!-- ForgeMods タブ -->
+          <div class="detail-tab-content" id="dtab-forgemods">
+            <div id="files-forgemods"></div>
+          </div>
+          <!-- FabricMods タブ -->
+          <div class="detail-tab-content" id="dtab-fabricmods">
+            <div id="files-fabricmods"></div>
+          </div>
+          <!-- Files タブ -->
+          <div class="detail-tab-content" id="dtab-files">
+            <div id="files-files"></div>
+          </div>
+          <!-- Libraries タブ -->
+          <div class="detail-tab-content" id="dtab-libraries">
+            <div id="files-libraries"></div>
+          </div>
+
+        </div>
+      </div>
+      <!-- /detail-overlay -->
+
+      <div class="form-panel">
+
+        <!-- CONFIG -->
+        <div class="page active" id="page-config">
+          <h2>⚙ 環境設定</h2>
+
+          <!-- プロファイル選択 -->
+          <div class="card" style="margin-bottom:14px;">
+            <div class="card-title">プロファイル</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <select id="profile-select" class="form-input" style="flex:1;min-width:120px;margin:0" onchange="switchProfile(this.value)"></select>
+              <button class="btn btn-secondary" style="margin:0;white-space:nowrap" onclick="toggleAddProfile()">＋ 追加</button>
+              <button class="btn btn-secondary" style="margin:0;white-space:nowrap;color:#e74c3c" id="btn-del-profile" onclick="deleteProfile()">🗑 削除</button>
+            </div>
+            <div id="add-profile-row" style="display:none;margin-top:8px;display:none;gap:6px;align-items:center;">
+              <input id="new-profile-name" class="form-input" type="text" placeholder="プロファイル名" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')addProfile()">
+              <button class="btn" style="margin:0;white-space:nowrap" onclick="addProfile()">作成</button>
+              <button class="btn btn-secondary" style="margin:0" onclick="toggleAddProfile()">キャンセル</button>
+            </div>
+          </div>
+
+          <!-- 現在の設定 読み取り専用 -->
+          <div class="current-config-card">
+            <h3>現在有効な設定</h3>
+            <div class="cfg-row"><span class="key">ROOT</span><span class="val missing" id="cur-root">—</span></div>
+            <div class="cfg-row"><span class="key">BASE URL</span><span class="val missing" id="cur-baseurl">—</span></div>
+            <div class="cfg-row"><span class="key">Java</span><span class="val missing" id="cur-java">—</span></div>
+            <div class="cfg-row"><span class="key">Helios フォルダ</span><span class="val missing" id="cur-helios">—</span></div>
+          </div>
+
+          <div class="divider"></div>
+          <div class="note">設定を変更する場合は下のフォームを編集して「保存」してください。</div>
+
+          <div class="form-group">
+            <label>ROOT ディレクトリ *</label>
+            <input type="text" id="cfg-root" placeholder="例: D:\TestRoot">
+            <div class="hint">配布ファイルを生成するルートフォルダのパス</div>
+          </div>
+          <div class="form-group">
+            <label>BASE URL *</label>
+            <input type="text" id="cfg-baseurl" placeholder="例: http://localhost:8080/">
+            <div class="hint">ファイルホストのベースURL</div>
+          </div>
+          <div class="form-group">
+            <label>Java 実行ファイルパス</label>
+            <input type="text" id="cfg-java" placeholder="例: C:\Program Files\...\bin\java.exe">
+            <div class="hint">Java 8+ が必要です (Adoptium 推奨)</div>
+          </div>
+          <div class="form-group">
+            <label>Helios データフォルダ</label>
+            <input type="text" id="cfg-helios" placeholder="例: C:\Users\user\AppData\Roaming\Helios Launcher">
+            <div class="hint">--installLocal オプションを使う場合のみ必要</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <button class="btn" onclick="saveConfig()">💾 保存</button>
+            <span style="color:var(--success);font-size:0.85rem;display:none" id="config-saved">✓ 保存しました</span>
+          </div>
+        </div>
+
+        <!-- SERVERS -->
+        <div class="page" id="page-servers">
+          <div class="servers-toolbar">
+            <h2 style="margin:0">📋 サーバー一覧</h2>
+            <button class="btn btn-secondary" style="padding:5px 12px;font-size:0.8rem;margin:0" onclick="loadServers()">↻ 更新</button>
+          </div>
+          <div class="servers-count" id="servers-count" style="margin-bottom:8px;"></div>
+          <div class="server-grid" id="server-grid">
+            <div class="empty-state">読み込み中...</div>
+          </div>
+        </div>
+
+        <!-- INIT ROOT -->
+        <div class="page" id="page-init-root">
+          <h2>📁 Init Root</h2>
+          <div class="note">
+            ROOT ディレクトリに空のファイル構造と JSON スキーマを生成します。<br>
+            <strong>最初に一度だけ実行してください。</strong>
+          </div>
+          <button class="btn" onclick="runInitRoot()" id="btn-init-root">▶ 実行</button>
+        </div>
+
+        <!-- GEN SERVER -->
+        <div class="page" id="page-gen-server">
+          <h2>🖥 サーバー生成</h2>
+          <div class="note warn">Forge と Fabric は同時に指定できません。</div>
+          <div class="form-group">
+            <label>サーバー ID *</label>
+            <input type="text" id="srv-id" placeholder="例: Test1">
+          </div>
+          <div class="form-group">
+            <label>Minecraft バージョン *</label>
+            <input type="text" id="srv-version" placeholder="例: 1.12.2">
+          </div>
+          <div class="form-group">
+            <label>Forge バージョン (任意)</label>
+            <input type="text" id="srv-forge" placeholder="例: 14.23.5.2847 または latest / recommended">
+          </div>
+          <div class="form-group">
+            <label>Fabric バージョン (任意)</label>
+            <input type="text" id="srv-fabric" placeholder="例: 0.15.11 または latest">
+          </div>
+          <button class="btn" onclick="runGenServer()" id="btn-gen-server">▶ 生成</button>
+        </div>
+
+        <!-- GEN CURSEFORGE -->
+        <div class="page" id="page-gen-curseforge">
+          <h2>🔮 CurseForge から生成</h2>
+          <div class="note">
+            CurseForge のモッドパック ZIP を <code>${ROOT}/modpacks/curseforge</code> に置いてから実行してください。
+          </div>
+          <div class="form-group">
+            <label>サーバー ID *</label>
+            <input type="text" id="cf-id" placeholder="例: MyModpack">
+          </div>
+          <div class="form-group">
+            <label>ZIP ファイル名 *</label>
+            <input type="text" id="cf-zip" placeholder="例: MyModpack-1.0.0.zip">
+          </div>
+          <button class="btn" onclick="runGenCurseForge()" id="btn-gen-cf">▶ 生成</button>
+        </div>
+
+        <!-- GEN DISTRO -->
+        <div class="page" id="page-gen-distro">
+          <h2>📦 Distribution 生成</h2>
+          <div class="form-group">
+            <label>出力ファイル名</label>
+            <input type="text" id="distro-name" placeholder="distribution" value="distribution">
+            <div class="hint">.json が自動付加されます</div>
+          </div>
+          <div class="form-group">
+            <div class="checkbox-group">
+              <input type="checkbox" id="distro-install-local">
+              <label for="distro-install-local">Helios にインストール (--installLocal)</label>
+            </div>
+            <div class="checkbox-group">
+              <input type="checkbox" id="distro-discard">
+              <label for="distro-discard">キャッシュ出力を削除 (--discardOutput)</label>
+            </div>
+            <div class="checkbox-group">
+              <input type="checkbox" id="distro-invalidate">
+              <label for="distro-invalidate">キャッシュを無効化 (--invalidateCache)</label>
+            </div>
+          </div>
+          <button class="btn" onclick="runGenDistro()" id="btn-gen-distro">▶ 生成</button>
+        </div>
+
+        <!-- GEN SCHEMAS -->
+        <div class="page" id="page-gen-schemas">
+          <h2>📄 スキーマ生成</h2>
+          <div class="note">JSON スキーマを更新します。Nebula を更新した後に実行してください。</div>
+          <button class="btn" onclick="runGenSchemas()" id="btn-gen-schemas">▶ 実行</button>
+        </div>
+
+        <!-- FORGE INFO -->
+        <div class="page" id="page-forge-info">
+          <h2>🔨 Forge バージョン確認</h2>
+          <div class="form-group">
+            <label>Minecraft バージョン</label>
+            <input type="text" id="fi-version" placeholder="例: 1.12.2">
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn" id="btn-latest-forge" onclick="runLatestForge()">最新バージョン取得</button>
+            <button class="btn btn-secondary" id="btn-recommended-forge" onclick="runRecommendedForge()">推奨バージョン取得</button>
+          </div>
+
+          <!-- 結果表示カード -->
+          <div class="result-card" id="forge-result-card">
+            <div class="result-label" id="forge-result-label">最新バージョン</div>
+            <div class="result-version" id="forge-result-version">—</div>
+            <div class="result-type" id="forge-result-mcver"></div>
+          </div>
+        </div>
+
+        <!-- FABRIC INFO -->
+        <div class="page" id="page-fabric-info">
+          <h2>🧵 Fabric バージョン確認</h2>
+          <div class="note">
+            Fabric Loader のバージョンを取得します。MC バージョンの指定は不要です。
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn" id="btn-latest-fabric" onclick="runLatestFabric()">最新バージョン取得</button>
+            <button class="btn btn-secondary" id="btn-stable-fabric" onclick="runStableFabric()">安定版バージョン取得</button>
+          </div>
+
+          <!-- Loader 結果カード -->
+          <div class="result-card" id="fabric-result-card">
+            <div class="result-label" id="fabric-result-label">最新バージョン</div>
+            <div class="result-version" id="fabric-result-version">—</div>
+            <div class="result-type">Fabric Loader</div>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- 対応 MC バージョン -->
+          <div style="margin-bottom:10px;">
+            <button class="btn btn-secondary" id="btn-fabric-mcver" onclick="runFabricMcVersions()">対応 Minecraft バージョン一覧を取得</button>
+          </div>
+          <div id="fabric-mcver-list" style="display:none;">
+            <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;">安定版 MC バージョン (Fabric 対応)</div>
+            <div id="fabric-mcver-tags" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+          </div>
+        </div>
+
+        <!-- ===== GitHub 連携 ===== -->
+        <div class="page" id="page-github">
+          <h2>🐙 GitHub 連携</h2>
+
+          <!-- 設定カード -->
+          <div class="card" style="margin-bottom:12px;">
+            <div class="card-title">リポジトリ設定</div>
+            <label class="form-label">ローカル Git リポジトリのパス</label>
+            <div style="display:flex;gap:6px;">
+              <input id="git-repo-path" class="form-input" type="text" placeholder="例: C:\Users\you\my-modpack-repo" style="flex:1;margin:0">
+              <button class="btn btn-secondary" style="margin:0;white-space:nowrap" onclick="pickGitFolder()">📁 参照...</button>
+            </div>
+            <div style="display:flex;gap:12px;margin-top:8px;">
+              <div style="flex:1">
+                <label class="form-label">ブランチ</label>
+                <input id="git-branch" class="form-input" type="text" placeholder="main">
+              </div>
+              <div style="flex:2">
+                <label class="form-label">デフォルトコミットメッセージ</label>
+                <input id="git-commit-msg" class="form-input" type="text" placeholder="Update distribution">
+              </div>
+            </div>
+            <button class="btn" style="margin-top:8px" onclick="saveGitConfig()">💾 設定を保存</button>
+            <span id="git-config-saved" style="display:none;color:var(--success);font-size:0.82rem;margin-left:10px;">✓ 保存しました</span>
+          </div>
+
+          <!-- 同期ターゲット説明 -->
+          <div class="note" style="margin-bottom:12px;">
+            ROOT フォルダ内の <code>modpacks/</code> <code>repo/</code> <code>servers/</code> <code>distribution.json</code> を Git リポジトリにコピーしてからコミット＆プッシュできます。
+          </div>
+
+          <!-- プログレスバー -->
+          <div id="git-progress-wrap" style="display:none;margin-bottom:12px;">
+            <div style="display:flex;justify-content:space-between;font-size:0.82rem;margin-bottom:4px;">
+              <span id="git-progress-label" style="color:var(--text-muted);">処理中...</span>
+              <span id="git-progress-result" style="color:var(--success);display:none;"></span>
+            </div>
+            <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
+              <div id="git-progress-bar" style="height:100%;width:0%;background:var(--accent);border-radius:3px;transition:width 0.3s ease;"></div>
+            </div>
+          </div>
+
+          <!-- 操作ボタン -->
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+            <button class="btn" id="btn-git-sync" onclick="gitSync()">📂 ROOT → リポジトリへコピー</button>
+            <button class="btn" id="btn-git-fetch" onclick="gitFetch()">⬇ フェッチ</button>
+            <button class="btn" id="btn-git-pull" onclick="gitPull()">⬇ プル</button>
+          </div>
+
+          <!-- コミット＆プッシュ -->
+          <div class="card" style="margin-bottom:12px;">
+            <div class="card-title">コミット ＆ プッシュ</div>
+            <label class="form-label">コミットメッセージ</label>
+            <input id="git-push-msg" class="form-input" type="text" placeholder="Update distribution">
+            <button class="btn" id="btn-git-push" style="margin-top:8px;background:#1a5c2e;border-color:#2d8a4e;" onclick="gitCommitPush()">🚀 コミット ＆ プッシュ</button>
+          </div>
+
+          <!-- Git ステータス -->
+          <div class="card" style="margin-bottom:12px;">
+            <div class="card-title" style="display:flex;justify-content:space-between;">
+              <span>Git ステータス</span>
+              <button class="btn btn-secondary" style="padding:3px 10px;font-size:0.78rem;margin:0" onclick="refreshGitStatus()">更新</button>
+            </div>
+            <div id="git-status-area" style="font-size:0.85rem;color:var(--text-muted);">—</div>
+          </div>
+
+          <!-- コミット履歴 -->
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;">
+              <span>最近のコミット</span>
+              <button class="btn btn-secondary" style="padding:3px 10px;font-size:0.78rem;margin:0" onclick="refreshGitLog()">更新</button>
+            </div>
+            <div id="git-log-area" style="font-size:0.83rem;color:var(--text-muted);">—</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- フォーム ↔ ログ リサイザー -->
+      <div class="resizer" id="resizer-log"></div>
+
+      <!-- LOG PANEL -->
+      <div class="log-panel" id="log-panel">
+        <div class="log-toolbar">
+          <span>実行ログ &nbsp;<span class="status-dot" id="status-dot"></span><span id="status-text">待機中</span></span>
+          <button class="btn btn-secondary" style="padding:4px 10px;font-size:0.78rem;margin:0" onclick="clearLog()">クリア</button>
+          <button class="btn btn-secondary" style="padding:4px 10px;font-size:0.78rem;margin:0;display:none" id="log-close-btn" onclick="toggleLogPanel()">✕ 閉じる</button>
+        </div>
+        <div id="log-output"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ログ表示フローティングボタン（狭い画面用） -->
+  <button id="log-fab" onclick="toggleLogPanel()">📋 ログ</button>
+</div>
+
+<script>
+const logEl = document.getElementById('log-output')
+const statusDot = document.getElementById('status-dot')
+const statusText = document.getElementById('status-text')
+
+// SSE
+const es = new EventSource('/api/logs')
+es.onmessage = (e) => {
+  const data = JSON.parse(e.data)
+  if (data.type === 'log') {
+    appendLog(data.level, data.message)
+  } else if (data.type === 'start') {
+    setStatus('running', '実行中...')
+    disableButtons(true)
+  } else if (data.type === 'done') {
+    setStatus(data.success ? 'ok' : 'fail', data.success ? '完了' : 'エラー')
+    disableButtons(false)
+    if (data.success) {
+      appendLog('done-ok', '✓ 完了しました')
+    } else {
+      appendLog('done-fail', `✗ エラー${data.error ? ': ' + data.error : ''}`)
+    }
+  }
+}
+
+function appendLog(level, message) {
+  const el = document.createElement('div')
+  el.className = 'log-entry ' + (level || 'info')
+  el.textContent = message
+  logEl.appendChild(el)
+  logEl.scrollTop = logEl.scrollHeight
+}
+
+function toggleLogPanel() {
+  const panel = document.getElementById('log-panel')
+  const closeBtn = document.getElementById('log-close-btn')
+  const isOpen = panel.classList.toggle('log-open')
+  closeBtn.style.display = isOpen ? 'inline-block' : 'none'
+}
+
+function clearLog() {
+  logEl.innerHTML = ''
+  setStatus('', '待機中')
+}
+
+function setStatus(state, text) {
+  statusDot.className = 'status-dot' + (state ? ' ' + state : '')
+  statusText.textContent = text
+}
+
+function disableButtons(disabled) {
+  document.querySelectorAll('.btn').forEach(b => { b.disabled = disabled })
+}
+
+function showPage(name) {
+  // 詳細オーバーレイが開いていたら閉じる
+  document.getElementById('detail-overlay').classList.remove('open')
+  closeMovePopover()
+  currentDetail = null
+
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'))
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'))
+  document.getElementById('page-' + name).classList.add('active')
+  document.getElementById('nav-' + name).classList.add('active')
+}
+
+// Config: 読み込んでフォームと現在値カードとヘッダーを更新
+let currentConfig = {}
+
+let currentProfileName = 'default'
+
+async function loadConfig() {
+  // プロファイル一覧を取得してセレクタを更新
+  const { active, profiles } = await fetch('/api/profiles').then(r => r.json())
+  currentProfileName = active
+  const sel = document.getElementById('profile-select')
+  sel.innerHTML = profiles.map(n =>
+    `<option value="${n}" ${n === active ? 'selected' : ''}>${n}</option>`
+  ).join('')
+  document.getElementById('btn-del-profile').disabled = profiles.length <= 1
+
+  // アクティブプロファイルの設定を読み込む
+  const cfg = await fetch('/api/config').then(r => r.json())
+  currentConfig = cfg
+  applyConfigToUI(cfg)
+}
+
+async function switchProfile(name) {
+  const r = await fetch(`/api/profiles/${encodeURIComponent(name)}/activate`, { method: 'POST' })
+  if (!r.ok) { alert('切り替えに失敗しました'); return }
+  currentProfileName = name
+  const cfg = await fetch('/api/config').then(r => r.json())
+  currentConfig = cfg
+  applyConfigToUI(cfg)
+  const saved = document.getElementById('config-saved')
+  saved.textContent = `✓ 「${name}」に切り替えました`
+  saved.style.display = 'inline'
+  setTimeout(() => { saved.style.display = 'none'; saved.textContent = '✓ 保存しました' }, 2500)
+}
+
+function toggleAddProfile() {
+  const row = document.getElementById('add-profile-row')
+  const visible = row.style.display === 'flex'
+  row.style.display = visible ? 'none' : 'flex'
+  if (!visible) setTimeout(() => document.getElementById('new-profile-name').focus(), 50)
+}
+
+async function addProfile() {
+  const name = document.getElementById('new-profile-name').value.trim()
+  if (!name) { document.getElementById('new-profile-name').focus(); return }
+  const r = await fetch('/api/profiles', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name })
+  })
+  if (!r.ok) { alert((await r.json()).error); return }
+  document.getElementById('new-profile-name').value = ''
+  document.getElementById('add-profile-row').style.display = 'none'
+  await loadConfig()
+  document.getElementById('profile-select').value = name
+  await switchProfile(name)
+}
+
+async function deleteProfile() {
+  if (!confirm(`「${currentProfileName}」を削除しますか？`)) return
+  const r = await fetch(`/api/profiles/${encodeURIComponent(currentProfileName)}`, { method: 'DELETE' })
+  if (!r.ok) { alert((await r.json()).error); return }
+  await loadConfig()
+}
+
+function applyConfigToUI(cfg) {
+  // 編集フォーム
+  document.getElementById('cfg-root').value = cfg.ROOT || ''
+  document.getElementById('cfg-baseurl').value = cfg.BASE_URL || ''
+  document.getElementById('cfg-java').value = cfg.JAVA_EXECUTABLE || ''
+  document.getElementById('cfg-helios').value = cfg.HELIOS_DATA_FOLDER || ''
+
+  // 現在の設定カード（読み取り専用）
+  setCurrentVal('cur-root', cfg.ROOT)
+  setCurrentVal('cur-baseurl', cfg.BASE_URL)
+  setCurrentVal('cur-java', cfg.JAVA_EXECUTABLE)
+  setCurrentVal('cur-helios', cfg.HELIOS_DATA_FOLDER)
+
+  // ヘッダーのチップ
+  setChipVal('hdr-root', cfg.ROOT)
+  setChipVal('hdr-baseurl', cfg.BASE_URL)
+  setChipVal('hdr-java', cfg.JAVA_EXECUTABLE)
+}
+
+function setCurrentVal(id, val) {
+  const el = document.getElementById(id)
+  if (val) {
+    el.textContent = val
+    el.classList.remove('missing')
+  } else {
+    el.textContent = '未設定'
+    el.classList.add('missing')
+  }
+}
+
+function setChipVal(id, val) {
+  const el = document.getElementById(id)
+  if (val) {
+    // 長いパスは末尾だけ表示
+    el.textContent = val.length > 40 ? '...' + val.slice(-37) : val
+    el.classList.remove('missing')
+  } else {
+    el.textContent = '未設定'
+    el.classList.add('missing')
+  }
+}
+
+async function saveConfig() {
+  const body = {
+    ROOT: document.getElementById('cfg-root').value,
+    BASE_URL: document.getElementById('cfg-baseurl').value,
+    JAVA_EXECUTABLE: document.getElementById('cfg-java').value,
+    HELIOS_DATA_FOLDER: document.getElementById('cfg-helios').value
+  }
+  await fetch(`/api/profiles/${encodeURIComponent(currentProfileName)}`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  })
+  // process.env も更新するため /api/config POST も呼ぶ
+  await fetch('/api/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })
+  currentConfig = body
+  applyConfigToUI(body)
+  const saved = document.getElementById('config-saved')
+  saved.style.display = 'inline'
+  setTimeout(() => saved.style.display = 'none', 2500)
+}
+
+// Commands
+async function post(url, body = {}) {
+  const res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })
+  return res.json()
+}
+
+function runInitRoot() { post('/api/init-root') }
+
+function runGenServer() {
+  post('/api/generate-server', {
+    id: document.getElementById('srv-id').value,
+    version: document.getElementById('srv-version').value,
+    forge: document.getElementById('srv-forge').value,
+    fabric: document.getElementById('srv-fabric').value
+  })
+}
+
+function runGenCurseForge() {
+  post('/api/generate-server-curseforge', {
+    id: document.getElementById('cf-id').value,
+    zipName: document.getElementById('cf-zip').value
+  })
+}
+
+function runGenDistro() {
+  post('/api/generate-distro', {
+    name: document.getElementById('distro-name').value || 'distribution',
+    installLocal: document.getElementById('distro-install-local').checked,
+    discardOutput: document.getElementById('distro-discard').checked,
+    invalidateCache: document.getElementById('distro-invalidate').checked
+  })
+}
+
+function runGenSchemas() { post('/api/generate-schemas') }
+
+// Forge: 結果をフォーム上のカードに表示
+async function runLatestForge() {
+  const version = document.getElementById('fi-version').value.trim()
+  if (!version) return
+  const data = await post('/api/latest-forge', { version })
+  if (data.ok && data.result) {
+    showForgeResult('最新バージョン (latest)', data.result, version)
+  }
+}
+
+async function runRecommendedForge() {
+  const version = document.getElementById('fi-version').value.trim()
+  if (!version) return
+  const data = await post('/api/recommended-forge', { version })
+  if (data.ok) {
+    if (data.result) {
+      showForgeResult('推奨バージョン (recommended)', data.result, version)
+    } else {
+      showForgeResult('推奨バージョン', '該当なし', version)
+    }
+  }
+}
+
+function showForgeResult(label, version, mcVer) {
+  const card = document.getElementById('forge-result-card')
+  document.getElementById('forge-result-label').textContent = label
+  document.getElementById('forge-result-version').textContent = version
+  document.getElementById('forge-result-mcver').textContent = `Minecraft ${mcVer}`
+  card.classList.add('visible')
+}
+
+// サーバー一覧
+async function loadServers() {
+  const grid = document.getElementById('server-grid')
+  const countEl = document.getElementById('servers-count')
+  grid.innerHTML = '<div class="empty-state">読み込み中...</div>'
+  countEl.textContent = ''
+
+  const data = await fetch('/api/servers').then(r => r.json())
+  const servers = data.servers ?? []
+
+  if (servers.length === 0) {
+    grid.innerHTML = '<div class="empty-state">サーバーが見つかりません。<br>Init Root → サーバー生成 を先に実行してください。</div>'
+    return
+  }
+
+  countEl.textContent = `${servers.length} サーバー`
+  grid.innerHTML = ''
+
+  for (const s of servers) {
+    const meta = s.meta ?? {}
+    const smeta = meta.meta ?? {}
+    const modLoader = meta.forge ? `Forge ${meta.forge.version}` : meta.fabric ? `Fabric ${meta.fabric.version}` : null
+    const loaderType = meta.forge ? 'forge' : meta.fabric ? 'fabric' : null
+    const icon = meta.forge ? '🔨' : meta.fabric ? '🧵' : '📦'
+
+    const card = document.createElement('div')
+    card.className = 'server-card'
+    card.style.cursor = 'pointer'
+    card.innerHTML = `
+      <div class="server-card-header">
+        <div class="server-icon">${icon}</div>
+        <div style="flex:1;min-width:0">
+          <div class="server-name">${smeta.name ?? s.name}</div>
+          <div class="server-desc">${smeta.description ?? ''}</div>
+        </div>
+        <span style="color:var(--text-muted);font-size:0.8rem">›</span>
+      </div>
+      <div class="server-tags">
+        ${smeta.version ? `<span class="tag">v${smeta.version}</span>` : ''}
+        ${smeta.address ? `<span class="tag">🌐 ${smeta.address}</span>` : ''}
+        ${modLoader ? `<span class="tag ${loaderType}">${modLoader}</span>` : ''}
+        ${s.modCount > 0 ? `<span class="tag">📦 ${s.modCount} mods</span>` : ''}
+        ${smeta.mainServer ? '<span class="tag main">★ メインサーバー</span>' : ''}
+      </div>
+      <div class="server-folder">📁 servers/${s.name}</div>
+    `
+    card.onclick = () => openDetail(s.name)
+    grid.appendChild(card)
+  }
+}
+
+// ===== サーバー詳細 =====
+let currentDetail = null  // { name, data }
+let activeMovePopover = null
+
+async function openDetail(serverName) {
+  const data = await fetch(`/api/servers/${encodeURIComponent(serverName)}/detail`).then(r => r.json())
+  currentDetail = { name: serverName, data }
+
+  // ヘッダー
+  document.getElementById('detail-server-name').textContent = serverName
+  const loaderTag = document.getElementById('detail-loader-tag')
+  if (data.meta?.forge) {
+    loaderTag.textContent = `Forge ${data.meta.forge.version}`
+    loaderTag.className = 'detail-loader-tag tag forge'
+  } else if (data.meta?.fabric) {
+    loaderTag.textContent = `Fabric ${data.meta.fabric.version}`
+    loaderTag.className = 'detail-loader-tag tag fabric'
+  } else {
+    loaderTag.textContent = ''
+  }
+
+  // 設定フォームに値をセット
+  const m = data.meta?.meta ?? {}
+  document.getElementById('d-name').value = m.name ?? ''
+  document.getElementById('d-desc').value = m.description ?? ''
+  document.getElementById('d-address').value = m.address ?? ''
+  document.getElementById('d-version').value = m.version ?? ''
+  document.getElementById('d-main').checked = m.mainServer ?? false
+  document.getElementById('d-autoconnect').checked = m.autoconnect ?? false
+
+  // ファイルタブを描画
+  for (const cat of ['forgemods','fabricmods','files','libraries']) {
+    renderFileCategory(cat, data.files[cat])
+  }
+
+  // 最初のタブをアクティブに
+  switchDetailTab('settings', document.querySelector('.detail-tab'))
+
+  document.getElementById('detail-overlay').classList.add('open')
+}
+
+async function deleteServer() {
+  if (!currentDetail) return
+  const name = currentDetail.name
+  if (!confirm(`「${name}」をファイルごと完全に削除しますか？\nこの操作は元に戻せません。`)) return
+  const r = await fetch(`/api/servers/${encodeURIComponent(name)}`, { method: 'DELETE' })
+  if (r.ok) {
+    closeDetail()
+    showPage('servers')
+    await loadServers()
+  } else {
+    const err = await r.json()
+    alert(`削除に失敗しました: ${err.error}`)
+  }
+}
+
+async function openExplorer() {
+  if (!currentDetail) return
+  await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/open-explorer`, { method: 'POST' })
+}
+
+// ===== GitHub 連携 =====
+async function pickGitFolder() {
+  const r = await fetch('/api/pick-folder', { method: 'POST' })
+  const { path } = await r.json()
+  if (path) document.getElementById('git-repo-path').value = path
+}
+
+async function loadGitPage() {
+  const cfg = await fetch('/api/git/config').then(r => r.json())
+  document.getElementById('git-repo-path').value = cfg.repoPath ?? ''
+  document.getElementById('git-branch').value = cfg.branch ?? 'main'
+  document.getElementById('git-commit-msg').value = cfg.commitMsg ?? 'Update distribution'
+  document.getElementById('git-push-msg').value = cfg.commitMsg ?? 'Update distribution'
+  if (cfg.repoPath) {
+    await refreshGitStatus()
+    await refreshGitLog()
+  }
+}
+
+async function saveGitConfig() {
+  const body = {
+    repoPath: document.getElementById('git-repo-path').value.trim(),
+    branch: document.getElementById('git-branch').value.trim() || 'main',
+    commitMsg: document.getElementById('git-commit-msg').value.trim() || 'Update distribution'
+  }
+  const r = await fetch('/api/git/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })
+  if (r.ok) {
+    const saved = document.getElementById('git-config-saved')
+    saved.style.display = 'inline'
+    setTimeout(() => { saved.style.display = 'none' }, 2500)
+    await refreshGitStatus()
+    await refreshGitLog()
+  } else {
+    const e = await r.json()
+    alert('保存失敗: ' + e.error)
+  }
+}
+
+async function refreshGitStatus() {
+  const area = document.getElementById('git-status-area')
+  area.textContent = '読み込み中...'
+  const r = await fetch('/api/git/status')
+  if (!r.ok) { area.textContent = (await r.json()).error ?? 'エラー'; return }
+  const s = await r.json()
+  const aheadBehind = s.tracking
+    ? `リモート: ${s.tracking} | ${s.ahead > 0 ? `↑${s.ahead}` : ''}${s.behind > 0 ? ` ↓${s.behind}` : ''}${s.ahead === 0 && s.behind === 0 ? '最新' : ''}`
+    : 'リモート未設定'
+
+  const fileList = (label, files) =>
+    files.length ? `<div style="margin-top:6px"><span style="color:var(--text-muted)">${label}</span><div style="margin-left:8px">${files.map(f=>`<span style="color:#e8c07d">📄 ${f}</span>`).join('<br>')}</div></div>` : ''
+
+  area.innerHTML = `
+    <div style="margin-bottom:4px">🌿 ブランチ: <strong>${s.branch}</strong> &nbsp;|&nbsp; ${aheadBehind}</div>
+    ${fileList('ステージ済み', s.staged)}
+    ${fileList('変更あり (未ステージ)', s.modified)}
+    ${fileList('未追跡', s.untracked)}
+    ${s.staged.length === 0 && s.modified.length === 0 && s.untracked.length === 0 ? '<span style="color:var(--success)">✓ クリーン</span>' : ''}
+  `
+}
+
+async function refreshGitLog() {
+  const area = document.getElementById('git-log-area')
+  area.textContent = '読み込み中...'
+  const r = await fetch('/api/git/log')
+  if (!r.ok) { area.textContent = (await r.json()).error ?? 'エラー'; return }
+  const logs = await r.json()
+  if (!logs.length) { area.textContent = 'コミット履歴なし'; return }
+  area.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+    <tr style="color:var(--text-muted);border-bottom:1px solid var(--border)">
+      <th style="text-align:left;padding:3px 6px">ハッシュ</th>
+      <th style="text-align:left;padding:3px 6px">メッセージ</th>
+      <th style="text-align:left;padding:3px 6px">作者</th>
+      <th style="text-align:left;padding:3px 6px">日時</th>
+    </tr>
+    ${logs.map(l => `<tr style="border-bottom:1px solid rgba(255,255,255,0.05)">
+      <td style="padding:4px 6px;font-family:monospace;color:#7ec8e3">${l.hash}</td>
+      <td style="padding:4px 6px">${l.message}</td>
+      <td style="padding:4px 6px;color:var(--text-muted)">${l.author}</td>
+      <td style="padding:4px 6px;color:var(--text-muted)">${new Date(l.date).toLocaleString('ja-JP',{dateStyle:'short',timeStyle:'short'})}</td>
+    </tr>`).join('')}
+  </table>`
+}
+
+// プログレスバー制御
+const GIT_BTNS = ['btn-git-sync', 'btn-git-fetch', 'btn-git-pull', 'btn-git-push']
+
+function gitProgressStart(label) {
+  document.getElementById('git-progress-wrap').style.display = 'block'
+  document.getElementById('git-progress-label').textContent = label
+  document.getElementById('git-progress-result').style.display = 'none'
+  const bar = document.getElementById('git-progress-bar')
+  bar.style.transition = 'none'
+  bar.style.width = '0%'
+  // indeterminate アニメーション: 0→80% まで徐々に進める
+  requestAnimationFrame(() => {
+    bar.style.transition = 'width 8s cubic-bezier(0.1,0.4,0.6,1)'
+    bar.style.width = '80%'
+  })
+  GIT_BTNS.forEach(id => { const b = document.getElementById(id); if (b) b.disabled = true })
+}
+
+function gitProgressDone(message, isError = false) {
+  const bar = document.getElementById('git-progress-bar')
+  bar.style.transition = 'width 0.2s ease'
+  bar.style.width = isError ? '100%' : '100%'
+  bar.style.background = isError ? '#c0392b' : 'var(--success)'
+  const result = document.getElementById('git-progress-result')
+  result.textContent = message
+  result.style.color = isError ? '#e74c3c' : 'var(--success)'
+  result.style.display = 'inline'
+  document.getElementById('git-progress-label').style.display = 'none'
+  GIT_BTNS.forEach(id => { const b = document.getElementById(id); if (b) b.disabled = false })
+  // 5秒後に非表示
+  setTimeout(() => {
+    document.getElementById('git-progress-wrap').style.display = 'none'
+    bar.style.background = 'var(--accent)'
+    document.getElementById('git-progress-label').style.display = 'inline'
+  }, 5000)
+}
+
+async function gitSync() {
+  gitProgressStart('📂 ファイルをコピー中...')
+  const r = await fetch('/api/git/sync', { method: 'POST' })
+  const data = await r.json()
+  if (r.ok) {
+    gitProgressDone(`✓ コピー完了: ${data.copied.join(', ')}`)
+    await refreshGitStatus()
+  } else { gitProgressDone('✗ コピー失敗: ' + data.error, true) }
+}
+
+async function gitFetch() {
+  gitProgressStart('⬇ フェッチ中...')
+  const r = await fetch('/api/git/fetch', { method: 'POST' })
+  const data = await r.json()
+  if (r.ok) { gitProgressDone('✓ ' + data.message); await refreshGitStatus() }
+  else { gitProgressDone('✗ フェッチ失敗: ' + data.error, true) }
+}
+
+async function gitPull() {
+  gitProgressStart('⬇ プル中...')
+  const r = await fetch('/api/git/pull', { method: 'POST' })
+  const data = await r.json()
+  if (r.ok) { gitProgressDone('✓ ' + data.message); await refreshGitStatus(); await refreshGitLog() }
+  else { gitProgressDone('✗ プル失敗: ' + data.error, true) }
+}
+
+async function gitCommitPush() {
+  const msg = document.getElementById('git-push-msg').value.trim()
+  if (!msg) { alert('コミットメッセージを入力してください'); return }
+  gitProgressStart('🚀 コミット ＆ プッシュ中...')
+  const r = await fetch('/api/git/commit-push', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ message: msg })
+  })
+  const data = await r.json()
+  if (r.ok) { gitProgressDone('✓ ' + data.message); await refreshGitStatus(); await refreshGitLog() }
+  else { gitProgressDone('✗ 失敗: ' + data.error, true) }
+}
+
+function closeDetail() {
+  document.getElementById('detail-overlay').classList.remove('open')
+  closeMovePopover()
+  currentDetail = null
+}
+
+function switchDetailTab(name, btn) {
+  document.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'))
+  document.querySelectorAll('.detail-tab-content').forEach(t => t.classList.remove('active'))
+  if (btn) btn.classList.add('active')
+  document.getElementById('dtab-' + name)?.classList.add('active')
+}
+
+// --- 設定保存 ---
+async function saveServerMeta() {
+  if (!currentDetail) return
+  const body = {
+    name: document.getElementById('d-name').value,
+    description: document.getElementById('d-desc').value,
+    address: document.getElementById('d-address').value,
+    version: document.getElementById('d-version').value,
+    mainServer: document.getElementById('d-main').checked,
+    autoconnect: document.getElementById('d-autoconnect').checked,
+  }
+  const r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/meta`, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  })
+  if (r.ok) {
+    const el = document.getElementById('meta-saved')
+    el.style.display = 'inline'
+    setTimeout(() => el.style.display = 'none', 2000)
+    // 一覧キャッシュを更新するため再読み込みはしない（次回 loadServers で反映）
+  }
+}
+
+// --- ファイル描画 ---
+function fmtSize(bytes) {
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024*1024) return `${(bytes/1024).toFixed(1)}KB`
+  return `${(bytes/(1024*1024)).toFixed(1)}MB`
+}
+
+function renderFileCategory(cat, info) {
+  const container = document.getElementById('files-' + cat)
+  container.innerHTML = ''
+
+  const SUBS = ['required','optionalon','optionaloff']
+  const SUB_LABELS = { required: '必須 (required)', optionalon: '任意ON (optionalon)', optionaloff: '任意OFF (optionaloff)' }
+
+  if (info.isToggleable) {
+    for (const sub of SUBS) {
+      const files = info[sub] ?? []
+      const sec = document.createElement('div')
+      sec.className = 'file-sub-section'
+      sec.dataset.sub = sub
+      sec.dataset.cat = cat
+
+      sec.innerHTML = `<div class="file-sub-label">${SUB_LABELS[sub]}</div>`
+      const emptyEl = document.createElement('div')
+      emptyEl.className = 'file-empty'
+      emptyEl.textContent = 'ファイルなし'
+      if (files.length === 0) sec.appendChild(emptyEl)
+      else for (const f of files) sec.appendChild(makeFileItem(cat, f, sub, true))
+
+      // このセクションをドロップターゲットにする
+      sec.addEventListener('dragover', (e) => {
+        e.preventDefault()
+        sec.classList.add('drag-target')
+      })
+      sec.addEventListener('dragleave', (e) => {
+        if (!sec.contains(e.relatedTarget)) sec.classList.remove('drag-target')
+      })
+      sec.addEventListener('drop', async (e) => {
+        e.preventDefault()
+        sec.classList.remove('drag-target')
+        const fromSub = e.dataTransfer.getData('fromSub')
+        const fromRelative = e.dataTransfer.getData('fromRelative')
+        const fromCat = e.dataTransfer.getData('cat')
+        if (fromCat !== cat || fromSub === sub || !fromRelative) return
+
+        const r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/move`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ category: cat, fromRelative, toSub: sub })
+        })
+        if (r.ok) {
+          const data = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/detail`).then(r => r.json())
+          currentDetail.data = data
+          renderFileCategory(cat, data.files[cat])
+        } else { alert('移動に失敗しました') }
+      })
+
+      sec.appendChild(makeDropZone(cat, sub))
+      container.appendChild(sec)
+    }
+  } else {
+    const files = info.flat ?? []
+    // dir ごとにグループ化（'' = ルート直下）
+    const groups = {}
+    for (const f of files) {
+      const key = f.dir || ''
+      if (!groups[key]) groups[key] = []
+      groups[key].push(f)
+    }
+
+    // ルート直下のファイル＋ドロップゾーン
+    const rootSec = makeFlatSection(cat, '', groups[''] ?? [])
+    container.appendChild(rootSec)
+
+    // サブフォルダごとのセクション
+    for (const [dir, groupFiles] of Object.entries(groups)) {
+      if (!dir) continue
+      container.appendChild(makeFlatSection(cat, dir, groupFiles))
+    }
+  }
+}
+
+// フラットカテゴリ用セクション（ドラッグターゲット＋ドロップゾーン付き）
+function makeFlatSection(cat, dir, files) {
+  const sec = document.createElement('div')
+  sec.className = 'file-sub-section'
+  sec.dataset.dir = dir
+  sec.dataset.cat = cat
+
+  if (dir) {
+    sec.innerHTML = `<div class="file-sub-label">📁 ${dir}</div>`
+  }
+
+  if (files.length === 0 && dir) {
+    const empty = document.createElement('div')
+    empty.className = 'file-empty'
+    empty.textContent = 'ファイルなし'
+    sec.appendChild(empty)
+  } else {
+    for (const f of files) sec.appendChild(makeFileItem(cat, f, null, false))
+  }
+
+  // このセクションをドラッグターゲット（フォルダ間移動）
+  sec.addEventListener('dragover', (e) => {
+    e.preventDefault()
+    sec.classList.add('drag-target')
+  })
+  sec.addEventListener('dragleave', (e) => {
+    if (!sec.contains(e.relatedTarget)) sec.classList.remove('drag-target')
+  })
+  sec.addEventListener('drop', async (e) => {
+    e.preventDefault()
+    sec.classList.remove('drag-target')
+    const fromCat = e.dataTransfer.getData('cat')
+    const fromRelative = e.dataTransfer.getData('fromRelative')
+    const fromDir = e.dataTransfer.getData('fromDir')
+    if (fromCat !== cat || !fromRelative || fromDir === dir) return
+
+    const fileName = fromRelative.split('/').pop()
+    const toRelative = dir ? `${dir}/${fileName}` : fileName
+    const r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/move`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ category: cat, fromRelative, toRelative })
+    })
+    if (r.ok) {
+      const data = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/detail`).then(r => r.json())
+      currentDetail.data = data
+      renderFileCategory(cat, data.files[cat])
+    } else { alert('移動に失敗しました') }
+  })
+
+  sec.appendChild(makeDropZone(cat, dir || null))
+  return sec
+}
+
+function makeFileItem(cat, file, currentSub, isToggleable) {
+  const div = document.createElement('div')
+  div.className = 'file-item'
+
+  // ドラッグ設定（toggleable / flat 両方対応）
+  div.draggable = true
+  div.addEventListener('dragstart', (e) => {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('cat', cat)
+    e.dataTransfer.setData('fromRelative', file.relativePath)
+    // toggleable: fromSub、flat: fromDir
+    e.dataTransfer.setData('fromSub', currentSub ?? '')
+    e.dataTransfer.setData('fromDir', file.dir ?? '')
+    div.classList.add('dragging')
+  })
+  div.addEventListener('dragend', () => div.classList.remove('dragging'))
+
+  div.innerHTML = `
+    <span style="color:var(--text-muted);font-size:0.7rem;cursor:grab;flex-shrink:0">⠿</span>
+    <span class="file-item-name" title="${file.name}">📄 ${file.name}</span>
+    <span class="file-item-size">${fmtSize(file.size)}</span>
+  `
+
+  // 削除ボタン
+  const delBtn = document.createElement('button')
+  delBtn.className = 'file-action-btn del'
+  delBtn.textContent = '削除'
+  delBtn.onclick = async (e) => {
+    e.stopPropagation()
+    if (!confirm(`「${file.name}」を削除しますか？`)) return
+    const r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/file`, {
+      method: 'DELETE',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ category: cat, relativePath: file.relativePath })
+    })
+    if (r.ok) div.remove()
+    else alert('削除に失敗しました')
+  }
+  div.appendChild(delBtn)
+  return div
+}
+
+function makeDropZone(cat, sub) {
+  const dz = document.createElement('div')
+  dz.className = 'drop-zone'
+  dz.textContent = '＋ ここにファイルをドロップ、またはクリックして追加'
+
+  // クリックでファイル選択
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.multiple = true
+  input.accept = '.jar,.zip'
+  input.style.display = 'none'
+  dz.appendChild(input)
+
+  dz.onclick = () => input.click()
+  input.onchange = () => uploadFiles(cat, sub, input.files, dz)
+
+  // ドラッグ&ドロップ
+  dz.ondragover = (e) => { e.preventDefault(); dz.classList.add('drag-over') }
+  dz.ondragleave = () => dz.classList.remove('drag-over')
+  dz.ondrop = (e) => {
+    e.preventDefault()
+    dz.classList.remove('drag-over')
+    uploadFiles(cat, sub, e.dataTransfer.files, dz)
+  }
+  return dz
+}
+
+async function uploadFiles(cat, sub, files, dropzone) {
+  if (!files?.length || !currentDetail) return
+  const fd = new FormData()
+  fd.append('category', cat)
+  if (sub) fd.append('sub', sub)
+  for (const f of files) fd.append('files', f)
+
+  dropzone.textContent = `アップロード中... (${files.length}件)`
+  const r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/upload`, { method: 'POST', body: fd })
+  if (r.ok) {
+    // 詳細を再読み込みして描画更新
+    const data = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/detail`).then(r => r.json())
+    currentDetail.data = data
+    renderFileCategory(cat, data.files[cat])
+  } else {
+    dropzone.textContent = '＋ ここにファイルをドロップ、またはクリックして追加'
+    alert('アップロードに失敗しました')
+  }
+}
+
+function closeMovePopover() {
+  if (activeMovePopover) { activeMovePopover.remove(); activeMovePopover = null }
+}
+
+// Fabric
+async function runLatestFabric() {
+  const data = await post('/api/latest-fabric')
+  if (data.ok && data.result) showFabricResult('最新バージョン (latest)', data.result)
+}
+
+async function runStableFabric() {
+  const data = await post('/api/stable-fabric')
+  if (data.ok && data.result) showFabricResult('安定版バージョン (stable)', data.result)
+}
+
+function showFabricResult(label, version) {
+  document.getElementById('fabric-result-label').textContent = label
+  document.getElementById('fabric-result-version').textContent = version
+  document.getElementById('fabric-result-card').classList.add('visible')
+}
+
+async function runFabricMcVersions() {
+  const data = await post('/api/fabric-mc-versions')
+  if (!data.ok || !data.result) return
+  const container = document.getElementById('fabric-mcver-tags')
+  const list = document.getElementById('fabric-mcver-list')
+  container.innerHTML = ''
+  data.result.forEach(ver => {
+    const tag = document.createElement('span')
+    tag.textContent = ver
+    tag.style.cssText = 'background:var(--surface2);border:1px solid #445;border-radius:4px;padding:2px 8px;font-size:0.78rem;font-family:Consolas,monospace;cursor:pointer;'
+    tag.title = 'クリックでサーバー生成のバージョン欄にコピー'
+    tag.onclick = () => {
+      document.getElementById('srv-version').value = ver
+      showPage('gen-server')
+    }
+    container.appendChild(tag)
+  })
+  list.style.display = 'block'
+}
+
+// ===== パネルリサイザー =====
+const RESIZE_DEFAULTS = { nav: 200, form: 420 }
+const RESIZE_MIN = { nav: 120, form: 240 }
+const RESIZE_MAX = { nav: 360, form: 700 }
+
+function applyPanelWidths(nav, form) {
+  const navEl = document.getElementById('sidebar')
+  navEl.dataset.savedWidth = nav
+  if (!navEl.classList.contains('collapsed')) {
+    navEl.style.width = nav + 'px'
+  }
+  const fp = document.querySelector('.form-panel')
+  fp.style.width = form + 'px'
+  fp.style.minWidth = 'unset'
+  fp.style.maxWidth = 'unset'
+}
+
+function loadPanelWidths() {
+  const nav  = parseInt(localStorage.getItem('panel-nav')  || RESIZE_DEFAULTS.nav)
+  const form = parseInt(localStorage.getItem('panel-form') || RESIZE_DEFAULTS.form)
+  applyPanelWidths(nav, form)
+}
+
+function savePanelWidths() {
+  const navEl = document.getElementById('sidebar')
+  if (!navEl.classList.contains('collapsed')) {
+    localStorage.setItem('panel-nav', navEl.offsetWidth)
+  }
+  localStorage.setItem('panel-form', document.querySelector('.form-panel').offsetWidth)
+}
+
+function resetPanelWidths() {
+  localStorage.removeItem('panel-nav')
+  localStorage.removeItem('panel-form')
+  const navEl = document.getElementById('sidebar')
+  navEl.style.width = RESIZE_DEFAULTS.nav + 'px'
+  navEl.dataset.savedWidth = RESIZE_DEFAULTS.nav
+  const fp = document.querySelector('.form-panel')
+  fp.style.width = RESIZE_DEFAULTS.form + 'px'
+  fp.style.minWidth = 'unset'
+  fp.style.maxWidth = 'unset'
+}
+
+function expandNav(navEl) {
+  const saved = parseInt(navEl.dataset.savedWidth || RESIZE_DEFAULTS.nav)
+  navEl.style.width = saved + 'px'
+}
+
+function initResizer(id, getEl, min, max) {
+  document.getElementById(id).addEventListener('mousedown', (e) => {
+    e.preventDefault()
+    document.getElementById(id).classList.add('dragging')
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    const startX = e.clientX
+    const startW = getEl().offsetWidth
+    const onMove = (e) => {
+      const w = Math.min(max, Math.max(min, startW + e.clientX - startX))
+      getEl().style.width = w + 'px'
+    }
+    const onUp = () => {
+      document.getElementById(id).classList.remove('dragging')
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      savePanelWidths()
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  })
+}
+
+// ナビ折りたたみトグル
+function toggleNav() {
+  const nav = document.getElementById('sidebar')
+  const collapsed = nav.classList.toggle('collapsed')
+  localStorage.setItem('nav-collapsed', collapsed ? '1' : '0')
+  if (collapsed) {
+    nav.style.width = ''
+  } else {
+    expandNav(nav)
+  }
+}
+
+function loadNavState() {
+  if (localStorage.getItem('nav-collapsed') === '1') {
+    document.getElementById('sidebar').classList.add('collapsed')
+  }
+}
+
+loadNavState()
+
+// 最長ラベルを基準に短いラベルの左パディングを調整（左揃えのまま中央寄り）
+;(function alignNavLabels() {
+  const labels = [...document.querySelectorAll('nav .section-label')]
+  if (!labels.length) return
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')
+  const cs = getComputedStyle(labels[0])
+  ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`
+  const widths = labels.map(el => ctx.measureText(el.textContent.trim()).width)
+  const maxW = Math.max(...widths)
+  labels.forEach((el, i) => {
+    el.style.paddingLeft = (8 + (maxW - widths[i]) / 2) + 'px'
+  })
+})()
+
+loadPanelWidths()
+initResizer('resizer-log', () => document.querySelector('.form-panel'), RESIZE_MIN.form, RESIZE_MAX.form)
+
+loadConfig()
+
+fetch('/api/version').then(r => r.json()).then(({ version }) => {
+  const el = document.getElementById('app-version')
+  if (el) el.textContent = 'v' + version
+})
+
+// ===== 自動アップデート =====
+if (window.electronAPI) {
+  window.electronAPI.onUpdateStatus((data) => {
+    const banner = document.getElementById('update-banner')
+    const msg = document.getElementById('update-banner-msg')
+    const progressWrap = document.getElementById('update-progress-wrap')
+    const bar = document.getElementById('update-progress-bar')
+    const pct = document.getElementById('update-progress-pct')
+
+    switch (data.status) {
+      case 'checking':
+        banner.style.display = 'flex'
+        banner.style.background = '#1a3a5c'
+        msg.textContent = '🔍 アップデートを確認中...'
+        progressWrap.style.display = 'none'
+        break
+      case 'available':
+        banner.style.display = 'flex'
+        banner.style.background = '#1a5c2e'
+        msg.textContent = `🎉 新バージョン ${data.version} が見つかりました。ダウンロード中...`
+        progressWrap.style.display = 'flex'
+        break
+      case 'not-available':
+        banner.style.display = 'flex'
+        banner.style.background = '#2a2a2a'
+        msg.textContent = '✓ 最新バージョンです'
+        progressWrap.style.display = 'none'
+        setTimeout(() => { banner.style.display = 'none' }, 4000)
+        break
+      case 'downloading':
+        banner.style.display = 'flex'
+        progressWrap.style.display = 'flex'
+        msg.textContent = `⬇ ダウンロード中 (${(data.transferred / 1024 / 1024).toFixed(1)} MB / ${(data.total / 1024 / 1024).toFixed(1)} MB)`
+        bar.style.width = data.percent + '%'
+        pct.textContent = data.percent + '%'
+        break
+      case 'downloaded':
+        banner.style.display = 'flex'
+        banner.style.background = '#1a5c2e'
+        progressWrap.style.display = 'none'
+        msg.textContent = `✅ バージョン ${data.version} の準備完了。再起動で適用されます。`
+        break
+      case 'error':
+        banner.style.display = 'flex'
+        banner.style.background = '#5c1a1a'
+        progressWrap.style.display = 'none'
+        msg.textContent = `⚠ アップデートエラー: ${data.message}`
+        break
+    }
+  })
+}
+</script>
+</body>
+</html>

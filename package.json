@@ -1,0 +1,112 @@
+{
+  "name": "nebula",
+  "version": "0.1.0",
+  "description": "Utility package to generate a distribution.json for Helios.",
+  "type": "module",
+  "exports": "./dist/index.js",
+  "main": "dist/electron/main.js",
+  "scripts": {
+    "clean": "rimraf dist",
+    "tsc": "tsc",
+    "build": "npm run clean && npm run tsc",
+    "start": "npm run build && node dist/index.js",
+    "fs": "node dist/index.js",
+    "faststart": "node dist/index.js",
+    "lint": "eslint .",
+    "ui": "npm run build && node dist/web/server.js",
+    "ui:fast": "node dist/web/server.js",
+    "electron": "npm run build && electron .",
+    "electron:fast": "electron .",
+    "dist": "npm run build && electron-builder"
+  },
+  "build": {
+    "appId": "com.nebulasoftware.modnebula",
+    "productName": "Nebula簡単操作",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "src/web/public/**",
+      "node_modules/**",
+      "profiles.json",
+      ".env"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": [
+        "ja-JP"
+      ],
+      "language": "1041"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "oogatakun",
+      "repo": "NebulaEasyUseSoft"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oogatakun/NebulaEasyUseSoft.git"
+  },
+  "keywords": [
+    "helios",
+    "nebula",
+    "distribution"
+  ],
+  "author": "Daniel Scalzi",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/dscalzi/Nebula/issues"
+  },
+  "homepage": "https://github.com/dscalzi/Nebula#readme",
+  "devDependencies": {
+    "@stylistic/eslint-plugin-ts": "^2.9.0",
+    "@types/fs-extra": "^11.0.4",
+    "@types/lodash.merge": "^4.6.8",
+    "@types/luxon": "^3.4.2",
+    "@types/node": "^20.16.11",
+    "@types/triple-beam": "^1.3.5",
+    "@types/yargs": "^17.0.33",
+    "electron": "^42.5.0",
+    "electron-builder": "^26.15.3",
+    "eslint": "^9.12.0",
+    "rimraf": "^6.0.1",
+    "typescript": "~5.6.3",
+    "typescript-eslint": "^8.9.0"
+  },
+  "dependencies": {
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.1.0",
+    "dotenv": "^16.4.5",
+    "electron-updater": "^6.8.9",
+    "express": "^5.2.1",
+    "fs-extra": "^11.2.0",
+    "got": "^14.4.3",
+    "helios-distribution-types": "^1.3.0",
+    "lodash.merge": "^4.6.2",
+    "luxon": "^3.5.0",
+    "minimatch": "^10.0.1",
+    "multer": "^2.2.0",
+    "node-stream-zip": "^1.15.0",
+    "simple-git": "^3.36.0",
+    "strip-ansi": "^7.2.0",
+    "toml": "^3.0.0",
+    "triple-beam": "^1.4.1",
+    "ts-json-schema-generator": "^2.3.0",
+    "winston": "^3.15.0",
+    "yargs": "^17.7.2"
+  }
+}

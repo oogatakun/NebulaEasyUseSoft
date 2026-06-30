@@ -1,0 +1,14 @@
+{
+  "active": "default",
+  "profiles": {
+    "default": {
+      "ROOT": "D:\\operation-modPack",
+      "BASE_URL": "https://raw.githubusercontent.com/oogatakun/operation-modPack/refs/heads/main/",
+      "JAVA_EXECUTABLE": "C:\\Program Files\\Eclipse Adoptium\\jdk-25.0.0.36-hotspot\\bin\\java.exe",
+      "HELIOS_DATA_FOLDER": "C:\\Users\\4jskk\\AppData\\Roaming\\NumaLauncher",
+      "GIT_REPO_PATH": "D:\\NebulaSoftWare\\test",
+      "GIT_BRANCH": "main",
+      "GIT_COMMIT_MSG": "Update distribution"
+    }
+  }
+}

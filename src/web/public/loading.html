@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Nebula簡単操作</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    gap: 20px;
+  }
+  h1 { font-size: 2rem; color: #7ec8e3; letter-spacing: 2px; }
+  .spinner {
+    width: 40px; height: 40px;
+    border: 3px solid rgba(126,200,227,0.2);
+    border-top-color: #7ec8e3;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #status { font-size: 0.9rem; color: #888; min-height: 1.2em; }
+  .progress-wrap {
+    width: 280px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 4px;
+    height: 6px;
+    display: none;
+  }
+  .progress-wrap.visible { display: block; }
+  .progress-bar {
+    height: 100%;
+    background: #7ec8e3;
+    border-radius: 4px;
+    width: 0%;
+    transition: width 0.3s ease;
+  }
+  #percent { font-size: 0.8rem; color: #7ec8e3; display: none; }
+  #percent.visible { display: block; }
+</style>
+</head>
+<body>
+  <h1>🌟 Nebula簡単操作</h1>
+  <div class="spinner"></div>
+  <p id="status">サーバーを起動中...</p>
+  <div class="progress-wrap" id="progress-wrap">
+    <div class="progress-bar" id="progress-bar"></div>
+  </div>
+  <p id="percent"></p>
+
+<script>
+  const statusEl  = document.getElementById('status')
+  const progressW = document.getElementById('progress-wrap')
+  const progressB = document.getElementById('progress-bar')
+  const percentEl = document.getElementById('percent')
+
+  function setStatus(msg) { statusEl.textContent = msg }
+  function setProgress(pct) {
+    progressW.classList.add('visible')
+    percentEl.classList.add('visible')
+    progressB.style.width = pct + '%'
+    percentEl.textContent = pct + '%'
+  }
+
+  if (window.electronAPI) {
+    window.electronAPI.onUpdateStatus((data) => {
+      switch (data.status) {
+        case 'server-ready':
+          setStatus('アップデートを確認中...')
+          break
+        case 'checking':
+          setStatus('アップデートを確認中...')
+          break
+        case 'available':
+          setStatus(`バージョン ${data.version} をダウンロード中...`)
+          break
+        case 'downloading':
+          setStatus(`ダウンロード中...`)
+          setProgress(data.percent)
+          break
+        case 'downloaded':
+          setStatus(`バージョン ${data.version} のダウンロード完了`)
+          setProgress(100)
+          break
+        case 'not-available':
+          setStatus('最新バージョンです')
+          break
+        case 'error':
+          setStatus('アップデート確認中にエラーが発生しました')
+          break
+      }
+    })
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "nebula-ui",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["dist/web/server.js"],
+      "port": 3000
+    }
+  ]
+}
