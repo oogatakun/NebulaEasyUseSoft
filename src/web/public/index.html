@@ -709,6 +709,11 @@
               <button class="btn btn-secondary" style="margin:0;white-space:nowrap" onclick="toggleAddProfile()">＋ 追加</button>
               <button class="btn btn-secondary" style="margin:0;white-space:nowrap;color:#e74c3c" id="btn-del-profile" onclick="deleteProfile()">🗑 削除</button>
             </div>
+            <div style="display:flex;gap:8px;margin-top:8px;">
+              <button class="btn btn-secondary" style="margin:0;flex:1" onclick="exportProfiles()">⬆ エクスポート</button>
+              <button class="btn btn-secondary" style="margin:0;flex:1" onclick="importProfiles()">⬇ インポート</button>
+              <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="handleImportFile(this)">
+            </div>
             <div id="add-profile-row" style="display:none;margin-top:8px;display:none;gap:6px;align-items:center;">
               <input id="new-profile-name" class="form-input" type="text" placeholder="プロファイル名" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')addProfile()">
               <button class="btn" style="margin:0;white-space:nowrap" onclick="addProfile()">作成</button>
@@ -1064,19 +1069,24 @@ function showPage(name) {
 // Config: 読み込んでフォームと現在値カードとヘッダーを更新
 let currentConfig = {}
 
-let currentProfileName = 'default'
+let currentProfileName = ''
 
 async function loadConfig() {
-  // プロファイル一覧を取得してセレクタを更新
   const { active, profiles } = await fetch('/api/profiles').then(r => r.json())
   currentProfileName = active
   const sel = document.getElementById('profile-select')
+  const delBtn = document.getElementById('btn-del-profile')
+  if (profiles.length === 0) {
+    sel.innerHTML = '<option value="" disabled selected>プロファイルなし</option>'
+    delBtn.disabled = true
+    applyConfigToUI({})
+    return
+  }
   sel.innerHTML = profiles.map(n =>
     `<option value="${n}" ${n === active ? 'selected' : ''}>${n}</option>`
   ).join('')
-  document.getElementById('btn-del-profile').disabled = profiles.length <= 1
+  delBtn.disabled = false
 
-  // アクティブプロファイルの設定を読み込む
   const cfg = await fetch('/api/config').then(r => r.json())
   currentConfig = cfg
   applyConfigToUI(cfg)
@@ -1117,10 +1127,37 @@ async function addProfile() {
 }
 
 async function deleteProfile() {
+  if (!currentProfileName) return
   if (!confirm(`「${currentProfileName}」を削除しますか？`)) return
   const r = await fetch(`/api/profiles/${encodeURIComponent(currentProfileName)}`, { method: 'DELETE' })
   if (!r.ok) { alert((await r.json()).error); return }
   await loadConfig()
+}
+
+function exportProfiles() {
+  window.location.href = '/api/profiles/export'
+}
+
+function importProfiles() {
+  document.getElementById('import-file-input').click()
+}
+
+async function handleImportFile(input) {
+  const file = input.files[0]
+  if (!file) return
+  try {
+    const text = await file.text()
+    const data = JSON.parse(text)
+    const r = await fetch('/api/profiles/import', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+    })
+    if (!r.ok) { alert((await r.json()).error); return }
+    await loadConfig()
+    alert('インポートしました')
+  } catch {
+    alert('ファイルの読み込みに失敗しました')
+  }
+  input.value = ''
 }
 
 function applyConfigToUI(cfg) {
@@ -1932,10 +1969,17 @@ initResizer('resizer-log', () => document.querySelector('.form-panel'), RESIZE_M
 
 loadConfig()
 
-fetch('/api/version').then(r => r.json()).then(({ version }) => {
-  const el = document.getElementById('app-version')
-  if (el) el.textContent = 'v' + version
-})
+if (window.electronAPI) {
+  window.electronAPI.getVersion().then(v => {
+    const el = document.getElementById('app-version')
+    if (el) el.textContent = 'v' + v
+  })
+} else {
+  fetch('/api/version').then(r => r.json()).then(({ version }) => {
+    const el = document.getElementById('app-version')
+    if (el) el.textContent = 'v' + version
+  })
+}
 
 // ===== 自動アップデート =====
 if (window.electronAPI) {

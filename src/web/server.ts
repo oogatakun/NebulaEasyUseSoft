@@ -66,17 +66,7 @@ function loadProfileStore(): ProfileStore {
     if (existsSync(PROFILES_FILE)) {
         try { return JSON.parse(readFileSync(PROFILES_FILE, 'utf-8')) } catch { /* fall through */ }
     }
-    // .env から default プロファイルを自動生成
-    const def: Profile = {
-        ROOT: process.env.ROOT ?? '',
-        BASE_URL: process.env.BASE_URL ?? '',
-        JAVA_EXECUTABLE: process.env.JAVA_EXECUTABLE,
-        HELIOS_DATA_FOLDER: process.env.HELIOS_DATA_FOLDER,
-        GIT_REPO_PATH: process.env.GIT_REPO_PATH,
-        GIT_BRANCH: process.env.GIT_BRANCH ?? 'main',
-        GIT_COMMIT_MSG: process.env.GIT_COMMIT_MSG ?? 'Update distribution'
-    }
-    return { active: 'default', profiles: { default: def } }
+    return { active: '', profiles: {} }
 }
 
 function saveProfileStore(store: ProfileStore): void {
@@ -93,9 +83,10 @@ function applyProfile(profile: Profile): void {
     process.env.GIT_COMMIT_MSG = profile.GIT_COMMIT_MSG ?? 'Update distribution'
 }
 
-// 起動時にアクティブプロファイルを適用
+// 起動時にアクティブプロファイルを適用（プロファイルがない場合はスキップ）
 const _initStore = loadProfileStore()
-applyProfile(_initStore.profiles[_initStore.active] ?? Object.values(_initStore.profiles)[0])
+const _initProfile = _initStore.profiles[_initStore.active] ?? Object.values(_initStore.profiles)[0]
+if (_initProfile) applyProfile(_initProfile)
 
 function getEnvConfig(): EnvConfig {
     return {
@@ -477,16 +468,39 @@ app.post('/api/profiles/:name/activate', (req, res) => {
 app.delete('/api/profiles/:name', (req, res) => {
     const store = loadProfileStore()
     if (!store.profiles[req.params.name]) { res.status(404).json({ error: 'Not found' }); return }
-    if (Object.keys(store.profiles).length <= 1) { res.status(400).json({ error: '最後のプロファイルは削除できません' }); return }
-    // アクティブなプロファイルを削除する場合は別のプロファイルに切り替える
     if (store.active === req.params.name) {
-        const next = Object.keys(store.profiles).find(k => k !== req.params.name)!
+        const next = Object.keys(store.profiles).find(k => k !== req.params.name) ?? ''
         store.active = next
-        applyProfile(store.profiles[next])
+        if (next) applyProfile(store.profiles[next])
     }
     delete store.profiles[req.params.name]
     saveProfileStore(store)
     res.json({ ok: true, newActive: store.active })
+})
+
+// --- プロファイル インポート / エクスポート ---
+app.get('/api/profiles/export', (_req, res) => {
+    const store = loadProfileStore()
+    res.setHeader('Content-Disposition', 'attachment; filename="neus-profiles.json"')
+    res.json(store)
+})
+
+app.post('/api/profiles/import', express.json(), (req, res) => {
+    const incoming = req.body as ProfileStore
+    if (!incoming?.profiles || typeof incoming.profiles !== 'object') {
+        res.status(400).json({ error: '無効なプロファイルデータです' }); return
+    }
+    const store = loadProfileStore()
+    // 既存プロファイルにマージ（上書き）
+    for (const [name, profile] of Object.entries(incoming.profiles)) {
+        store.profiles[name] = profile as Profile
+    }
+    if (incoming.active && store.profiles[incoming.active]) {
+        store.active = incoming.active
+        applyProfile(store.profiles[store.active])
+    }
+    saveProfileStore(store)
+    res.json({ ok: true, profiles: Object.keys(store.profiles) })
 })
 
 // --- Git 設定 ---
