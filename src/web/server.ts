@@ -597,6 +597,12 @@ app.post('/api/git/commit-push', async (req, res) => {
 })
 
 const PORT = process.env.PORT ?? 3000
-app.listen(PORT, () => {
-    console.log(`\n🌟 Nebula簡単操作 が起動しました: http://localhost:${PORT}\n`)
-})
+
+// 直接実行の場合はサーバーを起動、インポートされた場合はアプリをエクスポート
+if (import.meta.url === `file://${process.argv[1]}`) {
+    app.listen(PORT, () => {
+        console.log(`\n🌟 Nebula簡単操作 が起動しました: http://localhost:${PORT}\n`)
+    })
+}
+
+export { app }

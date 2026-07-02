@@ -194,6 +194,7 @@ export abstract class ModuleStructure extends BaseModelStructure<Module> {
 
             if(this.claritasResult == null) {
                 this.logger.error('Failed to process Claritas result!')
+                this.claritasResult = {}
             } else {
                 for(const [candidate, exception] of exceptionCandidates) {
                     this.claritasResult[candidate.filePath] = exception.proxyMetadata

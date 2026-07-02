@@ -1307,7 +1307,14 @@ async function saveConfig() {
 // Commands
 async function post(url, body = {}) {
   const res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })
-  return res.json()
+  const data = await res.json()
+  if (!res.ok) {
+    const errMsg = data.error || `Server error: ${res.status}`
+    console.error(`[API Error] ${url}: ${errMsg}`)
+    alert(`エラー: ${errMsg}`)
+    throw new Error(errMsg)
+  }
+  return data
 }
 
 function runInitRoot() { post('/api/init-root') }
