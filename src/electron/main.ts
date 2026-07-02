@@ -99,6 +99,7 @@ function createWindow() {
         minHeight: 600,
         title: 'Nebula簡単操作',
         icon,
+        backgroundColor: '#1a1a2e',
         autoHideMenuBar: true,
         webPreferences: {
             nodeIntegration: false,
@@ -107,20 +108,8 @@ function createWindow() {
         }
     })
 
-    // サーバー起動中はインライン HTML でスピナーを表示
-    win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#1a1a2e;color:#e0e0e0;font-family:'Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:20px}
-h1{font-size:2rem;color:#7ec8e3;letter-spacing:2px}
-.spinner{width:40px;height:40px;border:3px solid rgba(126,200,227,0.2);border-top-color:#7ec8e3;border-radius:50%;animation:spin 0.8s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-p{font-size:0.9rem;color:#888}
-</style></head><body>
-<h1>🌟 Nebula簡単操作</h1>
-<div class="spinner"></div>
-<p>サーバーを起動中...</p>
-</body></html>`))
+    // サーバー起動中はローカルファイルのスピナーを表示
+    win.loadFile(join(__dirname, '../../src/web/public/startup.html'))
 
     // サーバー起動後に loading.html を http:// で読み込む
     waitForServer('http://localhost:3000').then(async () => {

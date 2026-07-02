@@ -709,15 +709,20 @@
               <button class="btn btn-secondary" style="margin:0;white-space:nowrap" onclick="toggleAddProfile()">＋ 追加</button>
               <button class="btn btn-secondary" style="margin:0;white-space:nowrap;color:#e74c3c" id="btn-del-profile" onclick="deleteProfile()">🗑 削除</button>
             </div>
-            <div style="display:flex;gap:8px;margin-top:8px;">
-              <button class="btn btn-secondary" style="margin:0;flex:1" onclick="exportProfiles()">⬆ エクスポート</button>
-              <button class="btn btn-secondary" style="margin:0;flex:1" onclick="importProfiles()">⬇ インポート</button>
-              <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="handleImportFile(this)">
+            <div id="profile-dropzone" style="display:flex;gap:8px;margin-top:8px;border:2px dashed transparent;border-radius:8px;padding:4px;transition:border-color 0.15s,background 0.15s;">
+              <button class="btn btn-secondary" style="margin:0;flex:1" onclick="exportProfile()">⬆ エクスポート</button>
+              <button class="btn btn-secondary" style="margin:0;flex:1" onclick="importProfile()">⬇ インポート</button>
+              <input type="file" id="import-file-input" accept=".json,.env" style="display:none" onchange="handleImportFile(this)">
             </div>
             <div id="add-profile-row" style="display:none;margin-top:8px;display:none;gap:6px;align-items:center;">
               <input id="new-profile-name" class="form-input" type="text" placeholder="プロファイル名" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')addProfile()">
               <button class="btn" style="margin:0;white-space:nowrap" onclick="addProfile()">作成</button>
               <button class="btn btn-secondary" style="margin:0" onclick="toggleAddProfile()">キャンセル</button>
+            </div>
+            <div id="import-name-row" style="display:none;margin-top:8px;gap:6px;align-items:center;">
+              <input id="import-profile-name" class="form-input" type="text" placeholder="新しいプロファイル名" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')confirmImport();if(event.key==='Escape')cancelImport()">
+              <button class="btn" style="margin:0;white-space:nowrap" onclick="confirmImport()">作成</button>
+              <button class="btn btn-secondary" style="margin:0" onclick="cancelImport()">キャンセル</button>
             </div>
           </div>
 
@@ -1096,7 +1101,9 @@ async function switchProfile(name) {
   const r = await fetch(`/api/profiles/${encodeURIComponent(name)}/activate`, { method: 'POST' })
   if (!r.ok) { alert('切り替えに失敗しました'); return }
   currentProfileName = name
-  const cfg = await fetch('/api/config').then(r => r.json())
+  document.getElementById('profile-select').value = name
+  const { profile } = await r.json()
+  const cfg = { ROOT: profile.ROOT ?? '', BASE_URL: profile.BASE_URL ?? '', JAVA_EXECUTABLE: profile.JAVA_EXECUTABLE ?? '', HELIOS_DATA_FOLDER: profile.HELIOS_DATA_FOLDER ?? '' }
   currentConfig = cfg
   applyConfigToUI(cfg)
   const saved = document.getElementById('config-saved')
@@ -1134,31 +1141,107 @@ async function deleteProfile() {
   await loadConfig()
 }
 
-function exportProfiles() {
-  window.location.href = '/api/profiles/export'
+async function exportProfile() {
+  if (!currentProfileName) { alert('プロファイルが選択されていません'); return }
+  const profile = await fetch(`/api/profiles/${encodeURIComponent(currentProfileName)}`).then(r => r.json())
+  const blob = new Blob([JSON.stringify(profile, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = `neus-profile-${currentProfileName}.json`; a.click()
+  URL.revokeObjectURL(url)
 }
 
-function importProfiles() {
+function importProfile() {
   document.getElementById('import-file-input').click()
+}
+
+function parseEnvText(text) {
+  const profile = {}
+  const map = { ROOT: 'ROOT', BASE_URL: 'BASE_URL', JAVA_EXECUTABLE: 'JAVA_EXECUTABLE',
+    HELIOS_DATA_FOLDER: 'HELIOS_DATA_FOLDER', GIT_REPO_PATH: 'GIT_REPO_PATH',
+    GIT_BRANCH: 'GIT_BRANCH', GIT_COMMIT_MSG: 'GIT_COMMIT_MSG' }
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^([^#=\s][^=]*)=(.*)$/)
+    if (!m) continue
+    const key = m[1].trim(), val = m[2].trim().replace(/^["']|["']$/g, '')
+    if (map[key]) profile[map[key]] = val
+  }
+  return profile
+}
+
+let _pendingImportProfile = null
+
+async function applyImportedProfile(file) {
+  try {
+    const text = await file.text()
+    let profile
+    if (file.name.endsWith('.env') || file.name === '.env') {
+      profile = parseEnvText(text)
+    } else {
+      profile = JSON.parse(text)
+    }
+    const defaultName = file.name.replace(/\.(json|env)$/i, '').replace(/^neus-profile-/, '') || 'imported'
+    _pendingImportProfile = profile
+    const row = document.getElementById('import-name-row')
+    const input = document.getElementById('import-profile-name')
+    input.value = defaultName
+    row.style.display = 'flex'
+    setTimeout(() => input.focus(), 50)
+  } catch (e) {
+    alert('ファイルの読み込みに失敗しました: ' + (e?.message ?? String(e)))
+  }
+}
+
+async function confirmImport() {
+  const name = document.getElementById('import-profile-name').value.trim()
+  if (!name || !_pendingImportProfile) return
+  document.getElementById('import-name-row').style.display = 'none'
+  const cr = await fetch('/api/profiles', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name })
+  })
+  if (!cr.ok) { alert((await cr.json()).error); return }
+  await fetch(`/api/profiles/${encodeURIComponent(name)}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(_pendingImportProfile)
+  })
+  _pendingImportProfile = null
+  await loadConfig()
+  await switchProfile(name)
+}
+
+function cancelImport() {
+  _pendingImportProfile = null
+  document.getElementById('import-name-row').style.display = 'none'
 }
 
 async function handleImportFile(input) {
   const file = input.files[0]
   if (!file) return
-  try {
-    const text = await file.text()
-    const data = JSON.parse(text)
-    const r = await fetch('/api/profiles/import', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
-    })
-    if (!r.ok) { alert((await r.json()).error); return }
-    await loadConfig()
-    alert('インポートしました')
-  } catch {
-    alert('ファイルの読み込みに失敗しました')
-  }
+  await applyImportedProfile(file)
   input.value = ''
 }
+
+// ドラッグ＆ドロップ
+;(function initDropzone() {
+  const zone = document.getElementById('profile-dropzone')
+  if (!zone) return
+  zone.addEventListener('dragover', e => {
+    e.preventDefault()
+    zone.style.borderColor = 'var(--accent, #7ec8e3)'
+    zone.style.background = 'rgba(126,200,227,0.06)'
+  })
+  zone.addEventListener('dragleave', () => {
+    zone.style.borderColor = 'transparent'
+    zone.style.background = ''
+  })
+  zone.addEventListener('drop', async e => {
+    e.preventDefault()
+    zone.style.borderColor = 'transparent'
+    zone.style.background = ''
+    const file = e.dataTransfer?.files[0]
+    if (!file) return
+    await applyImportedProfile(file)
+  })
+})()
 
 function applyConfigToUI(cfg) {
   // 編集フォーム

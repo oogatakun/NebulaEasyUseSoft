@@ -1,6 +1,6 @@
 {
   "name": "NEUS",
-  "version": "0.4.0",
+  "version": "0.4.2",
   "description": "Utility package to generate a distribution.json for Helios.",
   "type": "module",
   "exports": "./dist/index.js",

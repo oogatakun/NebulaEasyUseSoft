@@ -430,6 +430,12 @@ app.get('/api/profiles', (_req, res) => {
     res.json({ active: store.active, profiles: Object.keys(store.profiles) })
 })
 
+app.get('/api/profiles/export', (_req, res) => {
+    const store = loadProfileStore()
+    res.setHeader('Content-Disposition', 'attachment; filename="neus-profiles.json"')
+    res.json(store)
+})
+
 app.get('/api/profiles/:name', (req, res) => {
     const store = loadProfileStore()
     const p = store.profiles[req.params.name]
@@ -461,8 +467,9 @@ app.post('/api/profiles/:name/activate', (req, res) => {
     if (!store.profiles[req.params.name]) { res.status(404).json({ error: 'Not found' }); return }
     store.active = req.params.name
     saveProfileStore(store)
-    applyProfile(store.profiles[req.params.name])
-    res.json({ ok: true })
+    const p = store.profiles[req.params.name]
+    applyProfile(p)
+    res.json({ ok: true, profile: p })
 })
 
 app.delete('/api/profiles/:name', (req, res) => {
@@ -478,13 +485,7 @@ app.delete('/api/profiles/:name', (req, res) => {
     res.json({ ok: true, newActive: store.active })
 })
 
-// --- プロファイル インポート / エクスポート ---
-app.get('/api/profiles/export', (_req, res) => {
-    const store = loadProfileStore()
-    res.setHeader('Content-Disposition', 'attachment; filename="neus-profiles.json"')
-    res.json(store)
-})
-
+// --- プロファイル インポート ---
 app.post('/api/profiles/import', express.json(), (req, res) => {
     const incoming = req.body as ProfileStore
     if (!incoming?.profiles || typeof incoming.profiles !== 'object') {
