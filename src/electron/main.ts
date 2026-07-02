@@ -2,21 +2,40 @@ import { app, BrowserWindow, shell, nativeImage, ipcMain } from 'electron'
 import { fileURLToPath } from 'url'
 import { dirname, join, resolve as resolvePath } from 'path'
 import { existsSync } from 'fs'
+import { spawn } from 'child_process'
 import pkg from 'electron-updater'
 const { autoUpdater } = pkg
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ICON_PATH = resolvePath(__dirname, '../../assets/icon.ico')
 
+let serverProcess: ReturnType<typeof spawn> | null = null
+
+function startServer() {
+    const serverScript = resolvePath(__dirname, '../web/server.js')
+    if (!existsSync(serverScript)) {
+        console.error(`Server script not found: ${serverScript}`)
+        return
+    }
+    serverProcess = spawn('node', [serverScript], {
+        stdio: 'ignore',
+        detached: false
+    })
+    serverProcess.on('error', (err) => console.error('Server error:', err))
+}
+
 app.setAppUserModelId('com.nebulasoftware.modnebula')
 
 let win: BrowserWindow | null = null
 
-// loading.html の UI を直接更新する
+// loading.html と main app の両方に状態を通知
 function pushState(state: Record<string, unknown>) {
+    // loading.html へ：executeJavaScript
     win?.webContents.executeJavaScript(
         `window.__onUpdateState && window.__onUpdateState(${JSON.stringify(state)})`
     ).catch(() => {})
+    // main app へ：IPC (主に手動チェック時)
+    win?.webContents.send('update-status', state)
 }
 
 async function waitForServer(url: string, maxMs = 15000): Promise<void> {
@@ -108,13 +127,29 @@ function createWindow() {
         }
     })
 
-    // サーバー起動中はローカルファイルのスピナーを表示
-    win.loadFile(join(__dirname, '../../src/web/public/startup.html'))
+    // サーバー起動中はインライン HTML でスピナーを表示
+    win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1a1a2e;color:#e0e0e0;font-family:'Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:20px}
+h1{font-size:2rem;color:#7ec8e3;letter-spacing:2px}
+.spinner{width:40px;height:40px;border:3px solid rgba(126,200,227,0.2);border-top-color:#7ec8e3;border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+p{font-size:0.9rem;color:#888}
+</style></head><body>
+<h1>🌟 Nebula簡単操作</h1>
+<div class="spinner"></div>
+<p>サーバーを起動中...</p>
+</body></html>`))
 
     // サーバー起動後に loading.html を http:// で読み込む
     waitForServer('http://localhost:3000').then(async () => {
         await new Promise<void>(resolve => {
-            win!.webContents.once('did-finish-load', resolve)
+            const onLoad = () => {
+                win!.webContents.off('did-finish-load', onLoad)
+                resolve()
+            }
+            win!.webContents.on('did-finish-load', onLoad)
             win!.loadURL('http://localhost:3000/loading.html')
         })
         if (!app.isPackaged) {
@@ -132,8 +167,18 @@ function createWindow() {
     win.on('closed', () => { win = null })
 }
 
-app.whenReady().then(createWindow)
-app.on('window-all-closed', () => { app.quit() })
+app.whenReady().then(() => {
+    startServer()
+    createWindow()
+})
+
+app.on('window-all-closed', () => {
+    if (serverProcess) {
+        serverProcess.kill()
+        serverProcess = null
+    }
+    app.quit()
+})
 app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
 })
