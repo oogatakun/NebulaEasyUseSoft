@@ -32,6 +32,14 @@ const PROJECT_ROOT = resolvePath(__dirname, '../..')
 const ASSETS_DIR = resolvePath(PROJECT_ROOT, 'assets')
 
 const app = express()
+// file:// から localhost へのリクエストを許可
+app.use((_req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+    if (_req.method === 'OPTIONS') { res.sendStatus(204); return }
+    next()
+})
 app.use(express.json())
 app.use(express.static(PUBLIC_DIR))
 app.use(express.static(ASSETS_DIR))
@@ -196,6 +204,18 @@ import { createRequire } from 'module'
 const _require = createRequire(import.meta.url)
 const _pkg = _require('../../package.json')
 app.get('/api/version', (_req, res) => { res.json({ version: _pkg.version }) })
+
+// アップデート状態（HTTP 経由で main.ts から書き込む）
+let _updateState: Record<string, unknown> = { status: 'checking' }
+app.get('/api/update-state', (_req, res) => res.json(_updateState))
+app.post('/api/update-state', express.json(), (req, res) => {
+    _updateState = req.body
+    res.json({ ok: true })
+})
+app.post('/api/update-confirm', express.json(), (req, res) => {
+    _updateState = { status: 'confirming', confirmed: req.body.confirmed }
+    res.json({ ok: true })
+})
 
 // --- Config ---
 app.get('/api/config', (_req, res) => { res.json(getEnvConfig()) })

@@ -4,7 +4,9 @@
       "mcp__Claude_Preview__preview_start",
       "PowerShell(powershell -NoProfile -NonInteractive -Command \"Add-Type -AssemblyName System.Windows.Forms; `$d = New-Object System.Windows.Forms.OpenFileDialog; `$d.Title = 'test'; `$d.ValidateNames = `$false; `$d.CheckFileExists = `$false; `$d.CheckPathExists = `$true; `$d.FileName = 'select'; if \\(`$d.ShowDialog\\(\\) -eq 'OK'\\) { [System.IO.Path]::GetDirectoryName\\(`$d.FileName\\) } else { '' }\" 2>&1 | head -5)",
       "PowerShell(New-Item -ItemType Directory -Force \"D:\\\\NebulaSoftWare\\\\ModNebula\\\\assets\")",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(gh release *)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

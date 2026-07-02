@@ -14,9 +14,10 @@
     align-items: center;
     justify-content: center;
     height: 100vh;
-    gap: 20px;
+    gap: 24px;
   }
   h1 { font-size: 2rem; color: #7ec8e3; letter-spacing: 2px; }
+
   .spinner {
     width: 40px; height: 40px;
     border: 3px solid rgba(126,200,227,0.2);
@@ -24,78 +25,156 @@
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
   }
+  .spinner.hidden { display: none; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
   #status { font-size: 0.9rem; color: #888; min-height: 1.2em; }
-  .progress-wrap {
-    width: 280px;
-    background: rgba(255,255,255,0.08);
-    border-radius: 4px;
-    height: 6px;
+
+  #update-info {
     display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    text-align: center;
   }
-  .progress-wrap.visible { display: block; }
-  .progress-bar {
-    height: 100%;
-    background: #7ec8e3;
-    border-radius: 4px;
-    width: 0%;
-    transition: width 0.3s ease;
+  #update-info.visible { display: flex; }
+  #update-version { font-size: 1.1rem; color: #7ec8e3; font-weight: 600; }
+  #update-desc { font-size: 0.85rem; color: #999; }
+
+  .btn-row { display: flex; gap: 12px; margin-top: 8px; }
+  .btn-row button {
+    padding: 9px 32px; border: none; border-radius: 6px;
+    cursor: pointer; font-size: 0.88rem; font-weight: 600;
+    transition: opacity 0.15s;
   }
-  #percent { font-size: 0.8rem; color: #7ec8e3; display: none; }
-  #percent.visible { display: block; }
+  .btn-row button:hover { opacity: 0.8; }
+  .btn-yes { background: #7ec8e3; color: #1a1a2e; }
+  .btn-no  { background: rgba(255,255,255,0.08); color: #aaa; border: 1px solid rgba(255,255,255,0.12); }
+
+  #progress-wrap {
+    width: 260px; background: rgba(255,255,255,0.08);
+    border-radius: 4px; height: 5px; display: none;
+  }
+  #progress-wrap.visible { display: block; }
+  #progress-bar { height: 100%; background: #7ec8e3; border-radius: 4px; width: 0%; transition: width 0.3s; }
+  #percent { font-size: 0.78rem; color: #7ec8e3; min-height: 1em; }
 </style>
 </head>
 <body>
   <h1>🌟 Nebula簡単操作</h1>
-  <div class="spinner"></div>
-  <p id="status">サーバーを起動中...</p>
-  <div class="progress-wrap" id="progress-wrap">
-    <div class="progress-bar" id="progress-bar"></div>
+  <div class="spinner" id="spinner"></div>
+  <p id="status">アップデートを確認中...</p>
+  <div id="update-info">
+    <div id="update-version"></div>
+    <div id="update-desc"></div>
+    <div class="btn-row" id="btn-row"></div>
   </div>
+  <div id="progress-wrap"><div id="progress-bar"></div></div>
   <p id="percent"></p>
 
 <script>
-  const statusEl  = document.getElementById('status')
-  const progressW = document.getElementById('progress-wrap')
-  const progressB = document.getElementById('progress-bar')
-  const percentEl = document.getElementById('percent')
+  const spinner    = document.getElementById('spinner')
+  const statusEl   = document.getElementById('status')
+  const updateInfo = document.getElementById('update-info')
+  const versionEl  = document.getElementById('update-version')
+  const descEl     = document.getElementById('update-desc')
+  const btnRow     = document.getElementById('btn-row')
+  const progressW  = document.getElementById('progress-wrap')
+  const progressB  = document.getElementById('progress-bar')
+  const percentEl  = document.getElementById('percent')
 
-  function setStatus(msg) { statusEl.textContent = msg }
-  function setProgress(pct) {
+  function showSpinner(v) { spinner.classList.toggle('hidden', !v) }
+  function setStatus(t) { statusEl.textContent = t }
+  function setProgress(p) {
     progressW.classList.add('visible')
-    percentEl.classList.add('visible')
-    progressB.style.width = pct + '%'
-    percentEl.textContent = pct + '%'
+    progressB.style.width = p + '%'
+    percentEl.textContent = p + '%'
+  }
+  function showUpdateUI(version, desc, buttons) {
+    showSpinner(false)
+    setStatus('')
+    versionEl.textContent = version
+    descEl.textContent = desc
+    btnRow.innerHTML = ''
+    buttons.forEach(({ label, cls, fn }) => {
+      const b = document.createElement('button')
+      b.textContent = label; b.className = cls; b.onclick = fn
+      btnRow.appendChild(b)
+    })
+    updateInfo.classList.add('visible')
+  }
+  function hideUpdateUI() {
+    updateInfo.classList.remove('visible')
+    btnRow.innerHTML = ''
   }
 
-  if (window.electronAPI) {
-    window.electronAPI.onUpdateStatus((data) => {
-      switch (data.status) {
-        case 'server-ready':
-          setStatus('アップデートを確認中...')
-          break
-        case 'checking':
-          setStatus('アップデートを確認中...')
-          break
-        case 'available':
-          setStatus(`バージョン ${data.version} をダウンロード中...`)
-          break
-        case 'downloading':
-          setStatus(`ダウンロード中...`)
-          setProgress(data.percent)
-          break
-        case 'downloaded':
-          setStatus(`バージョン ${data.version} のダウンロード完了`)
-          setProgress(100)
-          break
-        case 'not-available':
-          setStatus('最新バージョンです')
-          break
-        case 'error':
-          setStatus('アップデート確認中にエラーが発生しました')
-          break
-      }
-    })
+  // main.ts の pushState() から呼ばれる
+  window.__onUpdateState = function(data) {
+    switch (data.status) {
+      case 'checking':
+        showSpinner(true)
+        setStatus('アップデートを確認中...')
+        break
+
+      case 'available':
+        showUpdateUI(
+          `v${data.version} が利用可能です`,
+          'アップデートをダウンロードしますか？',
+          [
+            { label: 'アップデート', cls: 'btn-yes', fn: () => {
+                hideUpdateUI(); showSpinner(true); setStatus('ダウンロードを開始します...')
+                window.electronAPI.respondUpdate(true)
+              }
+            },
+            { label: 'スキップ', cls: 'btn-no', fn: () => {
+                try { window.electronAPI.respondUpdate(false) } catch {}
+                window.location.href = '/'
+              }
+            }
+          ]
+        )
+        break
+
+      case 'downloading':
+        hideUpdateUI()
+        showSpinner(false)
+        setStatus('ダウンロード中...')
+        setProgress(data.percent ?? 0)
+        break
+
+      case 'downloaded':
+        showUpdateUI(
+          `v${data.version} のダウンロード完了`,
+          'アプリを再起動してアップデートを適用しますか？',
+          [
+            { label: '今すぐ再起動', cls: 'btn-yes', fn: () => {
+                hideUpdateUI(); window.electronAPI.respondInstall(true)
+              }
+            },
+            { label: 'あとで', cls: 'btn-no', fn: () => {
+                hideUpdateUI(); window.electronAPI.respondInstall(false)
+              }
+            }
+          ]
+        )
+        break
+
+      case 'not-available':
+        showSpinner(false)
+        setStatus('最新バージョンです')
+        break
+
+      case 'error':
+        showUpdateUI(
+          'アップデートの確認に失敗しました',
+          data.message ?? '',
+          [{ label: 'そのまま起動', cls: 'btn-yes', fn: () => {
+              hideUpdateUI(); window.electronAPI.respondError()
+            }
+          }]
+        )
+        break
+    }
   }
 </script>
 </body>

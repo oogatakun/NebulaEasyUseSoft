@@ -1,6 +1,6 @@
 {
-  "name": "nebula",
-  "version": "0.1.0",
+  "name": "NEUS",
+  "version": "0.3.0",
   "description": "Utility package to generate a distribution.json for Helios.",
   "type": "module",
   "exports": "./dist/index.js",
@@ -28,6 +28,7 @@
     "files": [
       "dist/**",
       "src/web/public/**",
+      "assets/**",
       "node_modules/**",
       "profiles.json",
       ".env"
@@ -41,7 +42,8 @@
           ]
         }
       ],
-      "icon": "assets/icon.png"
+      "icon": "assets/icon.png",
+      "artifactName": "NEUS-setup-${version}.exe"
     },
     "nsis": {
       "oneClick": false,

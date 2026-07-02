@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, nativeImage, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, shell, nativeImage, ipcMain } from 'electron'
 import { fileURLToPath } from 'url'
 import { dirname, join, resolve as resolvePath } from 'path'
 import { existsSync } from 'fs'
@@ -10,11 +10,16 @@ const ICON_PATH = resolvePath(__dirname, '../../assets/icon.ico')
 
 app.setAppUserModelId('com.nebulasoftware.modnebula')
 
-import '../web/server.js'
-
 let win: BrowserWindow | null = null
 
-async function waitForServer(url: string, maxMs = 10000): Promise<void> {
+// loading.html の UI を直接更新する
+function pushState(state: Record<string, unknown>) {
+    win?.webContents.executeJavaScript(
+        `window.__onUpdateState && window.__onUpdateState(${JSON.stringify(state)})`
+    ).catch(() => {})
+}
+
+async function waitForServer(url: string, maxMs = 15000): Promise<void> {
     const start = Date.now()
     while (Date.now() - start < maxMs) {
         try { await fetch(url); return } catch { /* retry */ }
@@ -23,63 +28,65 @@ async function waitForServer(url: string, maxMs = 10000): Promise<void> {
 }
 
 function setupAutoUpdater(onDone: () => void) {
-    autoUpdater.autoDownload = true
+    autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = true
+    autoUpdater.allowPrerelease = false
+    autoUpdater.allowDowngrade = false
 
-    // どのルートでも一度だけ onDone を呼ぶ
     let done = false
     const finish = () => { if (!done) { done = true; onDone() } }
 
     // フォールバック：30秒後に強制遷移
     setTimeout(finish, 30000)
 
+    // ユーザーが loading.html のボタンを押したら IPC で受け取る
+    ipcMain.once('update-user-response', (_e, confirmed: boolean) => {
+        if (confirmed) {
+            autoUpdater.downloadUpdate().catch((err) => {
+                pushState({ status: 'error', message: err?.message ?? String(err) })
+            })
+        } else {
+            finish()
+        }
+    })
+
+    ipcMain.once('update-install-response', (_e, confirmed: boolean) => {
+        if (confirmed) autoUpdater.quitAndInstall()
+        else finish()
+    })
+
+    ipcMain.once('update-error-response', () => finish())
+
     autoUpdater.on('checking-for-update', () => {
-        win?.webContents.send('update-status', { status: 'checking' })
+        pushState({ status: 'checking' })
     })
 
     autoUpdater.on('update-available', (info) => {
-        win?.webContents.send('update-status', { status: 'available', version: info.version })
+        pushState({ status: 'available', version: info.version })
     })
 
     autoUpdater.on('update-not-available', () => {
-        win?.webContents.send('update-status', { status: 'not-available' })
-        setTimeout(finish, 800)
+        pushState({ status: 'not-available' })
+        setTimeout(finish, 1200)
     })
 
     autoUpdater.on('download-progress', (progress) => {
-        win?.webContents.send('update-status', {
-            status: 'downloading',
-            percent: Math.round(progress.percent),
-            transferred: progress.transferred,
-            total: progress.total
-        })
+        pushState({ status: 'downloading', percent: Math.round(progress.percent) })
     })
 
     autoUpdater.on('update-downloaded', (info) => {
-        win?.webContents.send('update-status', { status: 'downloaded', version: info.version })
-        dialog.showMessageBox({
-            type: 'info',
-            title: 'アップデート準備完了',
-            message: `バージョン ${info.version} のダウンロードが完了しました。`,
-            detail: 'アプリを再起動してアップデートを適用しますか？',
-            buttons: ['今すぐ再起動', 'あとで'],
-            defaultId: 0
-        }).then(({ response }) => {
-            if (response === 0) autoUpdater.quitAndInstall()
-            else finish()
-        })
+        pushState({ status: 'downloaded', version: info.version })
     })
 
     autoUpdater.on('error', (err) => {
-        win?.webContents.send('update-status', { status: 'error', message: err.message })
-        setTimeout(finish, 2000)
+        pushState({ status: 'error', message: err?.message ?? String(err) })
     })
 
-    autoUpdater.checkForUpdates()
+    autoUpdater.checkForUpdates().catch((err) => {
+        pushState({ status: 'error', message: err?.message ?? String(err) })
+    })
 }
 
-// レンダラーから手動チェック要求（メインアプリ画面から）
-ipcMain.on('check-for-updates', () => { autoUpdater.checkForUpdates() })
 ipcMain.handle('get-version', () => app.getVersion())
 
 function createWindow() {
@@ -96,18 +103,33 @@ function createWindow() {
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
-            preload: join(__dirname, 'preload.js')
+            preload: join(__dirname, 'preload.cjs')
         }
     })
 
-    win.loadFile(join(__dirname, '../../src/web/public/loading.html'))
+    // サーバー起動中はインライン HTML でスピナーを表示
+    win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1a1a2e;color:#e0e0e0;font-family:'Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:20px}
+h1{font-size:2rem;color:#7ec8e3;letter-spacing:2px}
+.spinner{width:40px;height:40px;border:3px solid rgba(126,200,227,0.2);border-top-color:#7ec8e3;border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+p{font-size:0.9rem;color:#888}
+</style></head><body>
+<h1>🌟 Nebula簡単操作</h1>
+<div class="spinner"></div>
+<p>サーバーを起動中...</p>
+</body></html>`))
 
-    waitForServer('http://localhost:3000').then(() => {
-        win?.webContents.send('update-status', { status: 'server-ready' })
-
+    // サーバー起動後に loading.html を http:// で読み込む
+    waitForServer('http://localhost:3000').then(async () => {
+        await new Promise<void>(resolve => {
+            win!.webContents.once('did-finish-load', resolve)
+            win!.loadURL('http://localhost:3000/loading.html')
+        })
         if (!app.isPackaged) {
-            // 開発モードではアップデートチェックをスキップ
-            setTimeout(() => win?.loadURL('http://localhost:3000'), 500)
+            setTimeout(() => win?.loadURL('http://localhost:3000'), 800)
         } else {
             setupAutoUpdater(() => win?.loadURL('http://localhost:3000'))
         }
@@ -122,9 +144,7 @@ function createWindow() {
 }
 
 app.whenReady().then(createWindow)
-
 app.on('window-all-closed', () => { app.quit() })
-
 app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
 })
