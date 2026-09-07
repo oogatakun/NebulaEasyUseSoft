@@ -706,23 +706,23 @@
             <div class="card-title">プロファイル</div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               <select id="profile-select" class="form-input" style="flex:1;min-width:120px;margin:0" onchange="switchProfile(this.value)"></select>
-              <button class="btn btn-secondary" style="margin:0;white-space:nowrap" onclick="toggleAddProfile()">＋ 追加</button>
-              <button class="btn btn-secondary" style="margin:0;white-space:nowrap;color:#e74c3c" id="btn-del-profile" onclick="deleteProfile()">🗑 削除</button>
+              <button class="btn btn-secondary nolock" style="margin:0;white-space:nowrap" onclick="toggleAddProfile()">＋ 追加</button>
+              <button class="btn btn-secondary nolock" style="margin:0;white-space:nowrap;color:#e74c3c" id="btn-del-profile" onclick="deleteProfile()">🗑 削除</button>
             </div>
             <div id="profile-dropzone" style="display:flex;gap:8px;margin-top:8px;border:2px dashed transparent;border-radius:8px;padding:4px;transition:border-color 0.15s,background 0.15s;">
-              <button class="btn btn-secondary" style="margin:0;flex:1" onclick="exportProfile()">⬆ エクスポート</button>
-              <button class="btn btn-secondary" style="margin:0;flex:1" onclick="importProfile()">⬇ インポート</button>
+              <button class="btn btn-secondary nolock" style="margin:0;flex:1" onclick="exportProfile()">⬆ エクスポート</button>
+              <button class="btn btn-secondary nolock" style="margin:0;flex:1" onclick="importProfile()">⬇ インポート</button>
               <input type="file" id="import-file-input" accept=".json,.env" style="display:none" onchange="handleImportFile(this)">
             </div>
             <div id="add-profile-row" style="display:none;margin-top:8px;display:none;gap:6px;align-items:center;">
               <input id="new-profile-name" class="form-input" type="text" placeholder="プロファイル名" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')addProfile()">
-              <button class="btn" style="margin:0;white-space:nowrap" onclick="addProfile()">作成</button>
-              <button class="btn btn-secondary" style="margin:0" onclick="toggleAddProfile()">キャンセル</button>
+              <button class="btn nolock" style="margin:0;white-space:nowrap" onclick="addProfile()">作成</button>
+              <button class="btn btn-secondary nolock" style="margin:0" onclick="toggleAddProfile()">キャンセル</button>
             </div>
             <div id="import-name-row" style="display:none;margin-top:8px;gap:6px;align-items:center;">
               <input id="import-profile-name" class="form-input" type="text" placeholder="新しいプロファイル名" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')confirmImport();if(event.key==='Escape')cancelImport()">
-              <button class="btn" style="margin:0;white-space:nowrap" onclick="confirmImport()">作成</button>
-              <button class="btn btn-secondary" style="margin:0" onclick="cancelImport()">キャンセル</button>
+              <button class="btn nolock" style="margin:0;white-space:nowrap" onclick="confirmImport()">作成</button>
+              <button class="btn btn-secondary nolock" style="margin:0" onclick="cancelImport()">キャンセル</button>
             </div>
           </div>
 
@@ -1011,23 +1011,63 @@ const statusDot = document.getElementById('status-dot')
 const statusText = document.getElementById('status-text')
 
 // SSE
+// コマンド実行状態を明示管理し、done を取りこぼしてもボタンが固まらないようにする
+let cmdRunning = false
+let cmdWatchdog = null
+
+function markRunning() {
+  cmdRunning = true
+  setStatus('running', '実行中...')
+  disableButtons(true)
+  kickWatchdog()
+}
+function markIdle(state, text) {
+  cmdRunning = false
+  if (cmdWatchdog) { clearTimeout(cmdWatchdog); cmdWatchdog = null }
+  setStatus(state, text)
+  disableButtons(false)
+}
+// 一定時間 SSE メッセージが来なければ「応答なし」とみなしてUIを復帰させる（永久フリーズ防止）
+function kickWatchdog() {
+  if (cmdWatchdog) clearTimeout(cmdWatchdog)
+  cmdWatchdog = setTimeout(() => {
+    if (cmdRunning) {
+      appendLog('done-fail', '⚠ 応答がないため操作を再度有効化しました')
+      markIdle('fail', '応答なし')
+    }
+  }, 120000)
+}
+
 const es = new EventSource('/api/logs')
 es.onmessage = (e) => {
-  const data = JSON.parse(e.data)
-  if (data.type === 'log') {
-    appendLog(data.level, data.message)
-  } else if (data.type === 'start') {
-    setStatus('running', '実行中...')
-    disableButtons(true)
-  } else if (data.type === 'done') {
-    setStatus(data.success ? 'ok' : 'fail', data.success ? '完了' : 'エラー')
-    disableButtons(false)
-    if (data.success) {
-      appendLog('done-ok', '✓ 完了しました')
-    } else {
-      appendLog('done-fail', `✗ エラー${data.error ? ': ' + data.error : ''}`)
+  let data
+  try { data = JSON.parse(e.data) } catch { return } // 壊れた/部分的なメッセージは無視
+  try {
+    if (data.type === 'log') {
+      appendLog(data.level, data.message)
+      if (cmdRunning) kickWatchdog() // ログが来ている間は生存とみなしタイマー延長
+    } else if (data.type === 'start') {
+      markRunning()
+    } else if (data.type === 'done') {
+      markIdle(data.success ? 'ok' : 'fail', data.success ? '完了' : 'エラー')
+      if (data.success) {
+        appendLog('done-ok', '✓ 完了しました')
+      } else {
+        appendLog('done-fail', `✗ エラー${data.error ? ': ' + data.error : ''}`)
+      }
     }
-  }
+  } catch (err) { console.error('SSE handler error', err) }
+}
+// 接続が切れたまま復帰しない場合、ボタンをロックしたままにしない
+es.onerror = () => {
+  if (!cmdRunning) return
+  setStatus('fail', '接続待機中...')
+  setTimeout(() => {
+    if (cmdRunning && es.readyState !== EventSource.OPEN) {
+      appendLog('done-fail', '⚠ サーバーとの接続が切れたため操作を再度有効化しました')
+      markIdle('fail', '接続切れ')
+    }
+  }, 8000)
 }
 
 function appendLog(level, message) {
@@ -1056,7 +1096,8 @@ function setStatus(state, text) {
 }
 
 function disableButtons(disabled) {
-  document.querySelectorAll('.btn').forEach(b => { b.disabled = disabled })
+  // .nolock を付けたボタン（プロファイル操作など）はコマンド実行中も無効化しない
+  document.querySelectorAll('.btn:not(.nolock)').forEach(b => { b.disabled = disabled })
 }
 
 function showPage(name) {
@@ -1071,45 +1112,78 @@ function showPage(name) {
   document.getElementById('nav-' + name).classList.add('active')
 }
 
+// レスポンスからエラーメッセージを安全に取り出す（500 が JSON でなく HTML/テキストの場合にも対応）
+async function readError(r) {
+  try {
+    const ct = r.headers.get('content-type') || ''
+    if (ct.includes('application/json')) { const j = await r.json(); return j.error || JSON.stringify(j) }
+    const t = await r.text()
+    return t.trim().slice(0, 500) || `HTTP ${r.status}`
+  } catch { return `HTTP ${r.status}` }
+}
+
 // Config: 読み込んでフォームと現在値カードとヘッダーを更新
 let currentConfig = {}
 
 let currentProfileName = ''
 
 async function loadConfig() {
-  const { active, profiles } = await fetch('/api/profiles').then(r => r.json())
-  currentProfileName = active
   const sel = document.getElementById('profile-select')
   const delBtn = document.getElementById('btn-del-profile')
-  if (profiles.length === 0) {
-    sel.innerHTML = '<option value="" disabled selected>プロファイルなし</option>'
-    delBtn.disabled = true
-    applyConfigToUI({})
-    return
-  }
-  sel.innerHTML = profiles.map(n =>
-    `<option value="${n}" ${n === active ? 'selected' : ''}>${n}</option>`
-  ).join('')
-  delBtn.disabled = false
+  try {
+    const pr = await fetch('/api/profiles')
+    if (!pr.ok) throw new Error(await readError(pr))
+    const { active, profiles } = await pr.json()
+    currentProfileName = active
+    if (profiles.length === 0) {
+      sel.innerHTML = '<option value="" disabled selected>プロファイルなし</option>'
+      delBtn.disabled = true
+      applyConfigToUI({})
+      return
+    }
+    sel.innerHTML = profiles.map(n =>
+      `<option value="${n}" ${n === active ? 'selected' : ''}>${n}</option>`
+    ).join('')
+    delBtn.disabled = false
 
-  const cfg = await fetch('/api/config').then(r => r.json())
-  currentConfig = cfg
-  applyConfigToUI(cfg)
+    const cr = await fetch('/api/config')
+    if (!cr.ok) throw new Error(await readError(cr))
+    const cfg = await cr.json()
+    currentConfig = cfg
+    applyConfigToUI(cfg)
+  } catch (e) {
+    // 読み込み失敗でUIが壊れないようにする（次の操作は引き続き可能）
+    console.error('loadConfig failed', e)
+    sel.innerHTML = '<option value="" disabled selected>読み込み失敗</option>'
+    delBtn.disabled = true
+  }
 }
 
 async function switchProfile(name) {
-  const r = await fetch(`/api/profiles/${encodeURIComponent(name)}/activate`, { method: 'POST' })
-  if (!r.ok) { alert('切り替えに失敗しました'); return }
-  currentProfileName = name
-  document.getElementById('profile-select').value = name
-  const { profile } = await r.json()
-  const cfg = { ROOT: profile.ROOT ?? '', BASE_URL: profile.BASE_URL ?? '', JAVA_EXECUTABLE: profile.JAVA_EXECUTABLE ?? '', HELIOS_DATA_FOLDER: profile.HELIOS_DATA_FOLDER ?? '' }
-  currentConfig = cfg
-  applyConfigToUI(cfg)
-  const saved = document.getElementById('config-saved')
-  saved.textContent = `✓ 「${name}」に切り替えました`
-  saved.style.display = 'inline'
-  setTimeout(() => { saved.style.display = 'none'; saved.textContent = '✓ 保存しました' }, 2500)
+  const sel = document.getElementById('profile-select')
+  // 同じプロファイルを選び直した場合は何もしない
+  if (name === currentProfileName) return
+  try {
+    const r = await fetch(`/api/profiles/${encodeURIComponent(name)}/activate`, { method: 'POST' })
+    if (!r.ok) {
+      alert('切り替えに失敗しました:\n' + await readError(r))
+      sel.value = currentProfileName // 元に戻し、同じ項目でも再試行できるようにする
+      return
+    }
+    currentProfileName = name
+    sel.value = name
+    const { profile } = await r.json()
+    const cfg = { ROOT: profile.ROOT ?? '', BASE_URL: profile.BASE_URL ?? '', JAVA_EXECUTABLE: profile.JAVA_EXECUTABLE ?? '', HELIOS_DATA_FOLDER: profile.HELIOS_DATA_FOLDER ?? '' }
+    currentConfig = cfg
+    applyConfigToUI(cfg)
+    const saved = document.getElementById('config-saved')
+    saved.textContent = `✓ 「${name}」に切り替えました`
+    saved.style.display = 'inline'
+    setTimeout(() => { saved.style.display = 'none'; saved.textContent = '✓ 保存しました' }, 2500)
+  } catch (e) {
+    alert('切り替え中にエラーが発生しました:\n' + e)
+    sel.value = currentProfileName
+  }
 }
 
 function toggleAddProfile() {
@@ -1125,7 +1199,7 @@ async function addProfile() {
   const r = await fetch('/api/profiles', {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name })
   })
-  if (!r.ok) { alert((await r.json()).error); return }
+  if (!r.ok) { alert('プロファイルを作成できませんでした:\n' + await readError(r)); return }
   document.getElementById('new-profile-name').value = ''
   document.getElementById('add-profile-row').style.display = 'none'
   await loadConfig()
@@ -1137,12 +1211,25 @@ async function deleteProfile() {
   if (!currentProfileName) return
   if (!confirm(`「${currentProfileName}」を削除しますか？`)) return
   const r = await fetch(`/api/profiles/${encodeURIComponent(currentProfileName)}`, { method: 'DELETE' })
-  if (!r.ok) { alert((await r.json()).error); return }
+  if (!r.ok) { alert('削除に失敗しました:\n' + await readError(r)); return }
   await loadConfig()
 }
 
 async function exportProfile() {
   if (!currentProfileName) { alert('プロファイルが選択されていません'); return }
+  // まずサーバー側の保存ダイアログ方式を試す（Electron でも確実にファイル出力できる）
+  try {
+    const r = await fetch(`/api/profiles/${encodeURIComponent(currentProfileName)}/export-file`, { method: 'POST' })
+    if (r.ok) {
+      const j = await r.json()
+      if (j.canceled) return
+      if (j.ok) { alert('エクスポートしました:\n' + j.path); return }
+    } else {
+      // 保存自体に失敗（権限など）はユーザーに提示して終了
+      alert('エクスポートに失敗しました:\n' + await readError(r)); return
+    }
+  } catch (_) { /* エンドポイント未対応（旧サーバー等）はブラウザDLへフォールバック */ }
+  // フォールバック：ブラウザのダウンロード（通常のブラウザで開いた場合）
   const profile = await fetch(`/api/profiles/${encodeURIComponent(currentProfileName)}`).then(r => r.json())
   const blob = new Blob([JSON.stringify(profile, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
@@ -1292,11 +1379,13 @@ async function saveConfig() {
     JAVA_EXECUTABLE: document.getElementById('cfg-java').value,
     HELIOS_DATA_FOLDER: document.getElementById('cfg-helios').value
   }
-  await fetch(`/api/profiles/${encodeURIComponent(currentProfileName)}`, {
+  const rp = await fetch(`/api/profiles/${encodeURIComponent(currentProfileName)}`, {
     method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
   })
+  if (!rp.ok) { alert('保存に失敗しました:\n' + await readError(rp)); return }
   // process.env も更新するため /api/config POST も呼ぶ
-  await fetch('/api/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })
+  const rc = await fetch('/api/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })
+  if (!rc.ok) { alert('保存に失敗しました:\n' + await readError(rc)); return }
   currentConfig = body
   applyConfigToUI(body)
   const saved = document.getElementById('config-saved')

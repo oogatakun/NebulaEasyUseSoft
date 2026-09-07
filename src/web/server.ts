@@ -1,7 +1,7 @@
 import express from 'express'
 import { resolve as resolvePath, join, relative, basename, dirname } from 'path'
 import { fileURLToPath } from 'url'
-import { existsSync, readFileSync, writeFileSync, readdirSync, statSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, unlinkSync } from 'fs'
 import { readdir, readFile, stat, unlink, rename, mkdir } from 'fs/promises'
 import { spawn } from 'child_process'
 import multer from 'multer'
@@ -45,7 +45,7 @@ app.use(express.static(PUBLIC_DIR))
 app.use(express.static(ASSETS_DIR))
 
 // ===== プロファイル管理 =====
-const PROFILES_FILE = resolvePath(PROJECT_ROOT, 'profiles.json')
+const PROFILES_FILE = process.env.PROFILES_FILE ?? resolvePath(PROJECT_ROOT, 'profiles.json')
 
 interface Profile {
     ROOT: string
@@ -70,7 +70,31 @@ function loadProfileStore(): ProfileStore {
 }
 
 function saveProfileStore(store: ProfileStore): void {
-    writeFileSync(PROFILES_FILE, JSON.stringify(store, null, 2), 'utf-8')
+    // 保存先ディレクトリが無い環境（userData 未作成など）に備えて確実に作成する
+    try {
+        mkdirSync(dirname(PROFILES_FILE), { recursive: true })
+    } catch { /* 既に存在する場合など。書き込み時のエラーで最終判定する */ }
+    try {
+        writeFileSync(PROFILES_FILE, JSON.stringify(store, null, 2), 'utf-8')
+    } catch (e: any) {
+        // 原因を握りつぶさず、切り分け可能なメッセージで投げ直す
+        const code = e?.code ? ` (${e.code})` : ''
+        console.error(`[Profiles] 書き込み失敗: ${PROFILES_FILE}${code}`, e)
+        throw new Error(`プロファイルの保存に失敗しました${code}: ${PROFILES_FILE} — ${e?.message ?? e}`)
+    }
+}
+
+// 起動時に保存先へ実際に書き込めるか検証し、失敗理由をログに残す（環境依存障害の切り分け用）
+function verifyProfilesWritable(): void {
+    try {
+        mkdirSync(dirname(PROFILES_FILE), { recursive: true })
+        const probe = join(dirname(PROFILES_FILE), `.write-test-${process.pid}`)
+        writeFileSync(probe, 'ok', 'utf-8')
+        try { unlinkSync(probe) } catch { /* ignore */ }
+        console.log(`[Profiles] 保存先は書き込み可能です: ${PROFILES_FILE}`)
+    } catch (e: any) {
+        console.error(`[Profiles] 保存先に書き込めません: ${PROFILES_FILE} (${e?.code ?? ''})`, e)
+    }
 }
 
 function applyProfile(profile: Profile): void {
@@ -84,6 +108,7 @@ function applyProfile(profile: Profile): void {
 }
 
 // 起動時にアクティブプロファイルを適用（プロファイルがない場合はスキップ）
+verifyProfilesWritable()
 const _initStore = loadProfileStore()
 const _initProfile = _initStore.profiles[_initStore.active] ?? Object.values(_initStore.profiles)[0]
 if (_initProfile) applyProfile(_initProfile)
@@ -436,6 +461,34 @@ app.get('/api/profiles/export', (_req, res) => {
     res.json(store)
 })
 
+// 単一プロファイルを保存ダイアログ経由でファイル出力（Electron でも確実に動く方式）
+app.post('/api/profiles/:name/export-file', (req, res) => {
+    const store = loadProfileStore()
+    const p = store.profiles[req.params.name]
+    if (!p) { res.status(404).json({ error: 'Not found' }); return }
+    const safeName = req.params.name.replace(/[\\/:*?"<>|]/g, '_')
+    const script = [
+        'Add-Type -AssemblyName System.Windows.Forms',
+        '$d = New-Object System.Windows.Forms.SaveFileDialog',
+        '$d.Title = "プロファイルのエクスポート先を選択"',
+        '$d.Filter = "JSON (*.json)|*.json"',
+        `$d.FileName = "neus-profile-${safeName}.json"`,
+        'if ($d.ShowDialog() -eq "OK") { $d.FileName } else { "" }'
+    ].join('; ')
+    const ps = spawn('powershell', ['-NoProfile', '-Command', script], { stdio: ['ignore', 'pipe', 'pipe'] })
+    let out = ''
+    ps.stdout.on('data', (chunk: Buffer) => { out += chunk.toString() })
+    ps.on('close', () => {
+        const dest = out.trim().split('\n').pop()?.trim() ?? ''
+        if (!dest) { res.json({ ok: false, canceled: true }); return }
+        try {
+            writeFileSync(dest, JSON.stringify(p, null, 2), 'utf-8')
+            res.json({ ok: true, path: dest })
+        } catch (e) { res.status(500).json({ error: String(e) }) }
+    })
+    ps.on('error', (e) => { res.status(500).json({ error: String(e) }) })
+})
+
 app.get('/api/profiles/:name', (req, res) => {
     const store = loadProfileStore()
     const p = store.profiles[req.params.name]
@@ -449,7 +502,7 @@ app.post('/api/profiles', (req, res) => {
     const store = loadProfileStore()
     if (store.profiles[name]) { res.status(400).json({ error: '同名のプロファイルが既に存在します' }); return }
     store.profiles[name] = { ROOT: '', BASE_URL: '', GIT_BRANCH: 'main', GIT_COMMIT_MSG: 'Update distribution' }
-    saveProfileStore(store)
+    try { saveProfileStore(store) } catch (e) { res.status(500).json({ error: String(e) }); return }
     res.json({ ok: true })
 })
 
@@ -457,7 +510,7 @@ app.put('/api/profiles/:name', (req, res) => {
     const store = loadProfileStore()
     if (!store.profiles[req.params.name]) { res.status(404).json({ error: 'Not found' }); return }
     store.profiles[req.params.name] = { ...store.profiles[req.params.name], ...req.body }
-    saveProfileStore(store)
+    try { saveProfileStore(store) } catch (e) { res.status(500).json({ error: String(e) }); return }
     if (store.active === req.params.name) applyProfile(store.profiles[req.params.name])
     res.json({ ok: true })
 })
@@ -466,7 +519,7 @@ app.post('/api/profiles/:name/activate', (req, res) => {
     const store = loadProfileStore()
     if (!store.profiles[req.params.name]) { res.status(404).json({ error: 'Not found' }); return }
     store.active = req.params.name
-    saveProfileStore(store)
+    try { saveProfileStore(store) } catch (e) { res.status(500).json({ error: String(e) }); return }
     const p = store.profiles[req.params.name]
     applyProfile(p)
     res.json({ ok: true, profile: p })
@@ -481,7 +534,7 @@ app.delete('/api/profiles/:name', (req, res) => {
         if (next) applyProfile(store.profiles[next])
     }
     delete store.profiles[req.params.name]
-    saveProfileStore(store)
+    try { saveProfileStore(store) } catch (e) { res.status(500).json({ error: String(e) }); return }
     res.json({ ok: true, newActive: store.active })
 })
 
@@ -500,7 +553,7 @@ app.post('/api/profiles/import', express.json(), (req, res) => {
         store.active = incoming.active
         applyProfile(store.profiles[store.active])
     }
-    saveProfileStore(store)
+    try { saveProfileStore(store) } catch (e) { res.status(500).json({ error: String(e) }); return }
     res.json({ ok: true, profiles: Object.keys(store.profiles) })
 })
 

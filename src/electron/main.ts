@@ -15,16 +15,15 @@ const ICON_PATH = resolvePath(__dirname, '../../assets/icon.ico')
 
 async function loadServer() {
     if (app.isPackaged) {
-        // パッケージ版：Express を直接インポート
-        const { app: expressApp } = await import('../web/server.js')
-        serverApp = expressApp
-        return expressApp
-    } else {
-        // 開発版：相対パスからインポート
-        const { app: expressApp } = await import('../web/server.js')
-        serverApp = expressApp
-        return expressApp
+        // パッケージ版フラグを設定
+        process.env.ELECTRON_PACKAGED = 'true'
+        // userData フォルダにプロファイルを保存
+        process.env.PROFILES_FILE = join(app.getPath('userData'), 'profiles.json')
     }
+    // Express を直接インポート
+    const { app: expressApp } = await import('../web/server.js')
+    serverApp = expressApp
+    return expressApp
 }
 
 function startServer() {

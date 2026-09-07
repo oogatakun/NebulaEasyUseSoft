@@ -49,6 +49,12 @@ export function addSchemaToObject<T>(obj: T, typeName: string, absoluteRoot: str
 
 export async function generateSchemas(absoluteRoot: string): Promise<void> {
 
+    // パッケージ版ではスキーマ生成をスキップ（src フォルダが利用不可）
+    if (process.env.ELECTRON_PACKAGED === 'true') {
+        logger.warn('Schema generation skipped in packaged app')
+        return
+    }
+
     const selfPath = __filename.replace('dist', 'src').replace('.js', '.ts')
 
     const schemaDir = getSchemaDirectory(absoluteRoot)
