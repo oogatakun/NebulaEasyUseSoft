@@ -1043,6 +1043,7 @@
           <!-- 操作ボタン -->
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
             <button class="btn" id="btn-git-sync" onclick="gitSync()">📂 ROOT → リポジトリへコピー</button>
+            <button class="btn" id="btn-git-sync-from" onclick="gitSyncFrom()">📥 リポジトリ → ROOTへコピー</button>
             <button class="btn" id="btn-git-fetch" onclick="gitFetch()">⬇ フェッチ</button>
             <button class="btn" id="btn-git-pull" onclick="gitPull()">⬇ プル</button>
           </div>
@@ -1905,7 +1906,7 @@ async function refreshGitLog() {
 }
 
 // プログレスバー制御
-const GIT_BTNS = ['btn-git-sync', 'btn-git-fetch', 'btn-git-pull', 'btn-git-push']
+const GIT_BTNS = ['btn-git-sync', 'btn-git-sync-from', 'btn-git-fetch', 'btn-git-pull', 'btn-git-push']
 
 function gitProgressStart(label) {
   document.getElementById('git-progress-wrap').style.display = 'block'
@@ -2019,6 +2020,17 @@ async function gitSync() {
   const data = await r.json()
   if (r.ok) {
     gitProgressDone(`✓ コピー完了: ${data.copied.join(', ')}`)
+    await refreshGitStatus()
+  } else { gitError('コピー失敗', data.error) }
+}
+
+async function gitSyncFrom() {
+  if (!confirm('リポジトリの内容を ROOT フォルダへコピーします。\nROOT 内の同名ファイル（modpacks/ repo/ servers/ meta/ distribution.json）は上書きされます。よろしいですか？')) return
+  gitProgressStart('📥 リポジトリから ROOT へコピー中...')
+  const r = await fetch('/api/git/sync-from', { method: 'POST' })
+  const data = await r.json()
+  if (r.ok) {
+    gitProgressDone(data.copied.length ? `✓ コピー完了: ${data.copied.join(', ')}` : '✓ コピー対象がありませんでした')
     await refreshGitStatus()
   } else { gitError('コピー失敗', data.error) }
 }

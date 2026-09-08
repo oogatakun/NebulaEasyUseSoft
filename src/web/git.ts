@@ -143,6 +143,31 @@ export async function syncToRepo(rootPath: string, repoPath: string): Promise<st
     return copied
 }
 
+// リポジトリ → ROOT へコピー（syncToRepo の逆方向。プル後に作業フォルダへ反映する用途）
+export async function syncFromRepo(rootPath: string, repoPath: string): Promise<string[]> {
+    const copied: string[] = []
+
+    for (const dir of SYNC_TARGETS) {
+        const src = join(resolvePath(repoPath), dir)
+        const dest = join(resolvePath(rootPath), dir)
+        if (existsSync(src)) {
+            cpSync(src, dest, { recursive: true, force: true })
+            copied.push(dir)
+        }
+    }
+
+    for (const file of SYNC_FILES) {
+        const src = join(resolvePath(repoPath), file)
+        const dest = join(resolvePath(rootPath), file)
+        if (existsSync(src)) {
+            cpSync(src, dest)
+            copied.push(file)
+        }
+    }
+
+    return copied
+}
+
 export async function gitFetch(repoPath: string): Promise<string> {
     const git = simpleGit(repoPath)
     await git.fetch()

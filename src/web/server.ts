@@ -7,7 +7,7 @@ import { spawn } from 'child_process'
 import multer from 'multer'
 import dotenv from 'dotenv'
 import { sseManager } from './SseLogTransport.js'
-import { getGitStatus, syncToRepo, gitFetch, gitPull, gitCommitPush, getLog, checkGitLink } from './git.js'
+import { getGitStatus, syncToRepo, syncFromRepo, gitFetch, gitPull, gitCommitPush, getLog, checkGitLink } from './git.js'
 import {
     cmdInitRoot,
     cmdGenerateServer,
@@ -629,6 +629,18 @@ app.post('/api/git/sync', async (_req, res) => {
     if (!repoPath || !existsSync(repoPath)) { res.status(400).json({ error: 'リポジトリパスが未設定または存在しません' }); return }
     try {
         const copied = await syncToRepo(env.ROOT, repoPath)
+        res.json({ ok: true, copied })
+    } catch (e) { res.status(500).json({ error: String(e) }) }
+})
+
+// リポジトリ → ROOT へコピー（逆方向）
+app.post('/api/git/sync-from', async (_req, res) => {
+    const env = getEnvConfig()
+    const { repoPath } = getGitConfig()
+    if (!env.ROOT) { res.status(400).json({ error: 'ROOTが未設定です' }); return }
+    if (!repoPath || !existsSync(repoPath)) { res.status(400).json({ error: 'リポジトリパスが未設定または存在しません' }); return }
+    try {
+        const copied = await syncFromRepo(env.ROOT, repoPath)
         res.json({ ok: true, copied })
     } catch (e) { res.status(500).json({ error: String(e) }) }
 })
