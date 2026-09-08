@@ -1,6 +1,93 @@
 import { simpleGit, SimpleGit, StatusResult } from 'simple-git'
 import { existsSync, cpSync } from 'fs'
 import { resolve as resolvePath, join } from 'path'
+import { spawn } from 'child_process'
+
+// 子プロセスを実行し、stdout/stderr と終了コードを収集する（起動失敗も spawnError として返す）
+function runProcess(cmd: string, args: string[], opts: { input?: string; timeoutMs?: number } = {}): Promise<{ code: number | null; stdout: string; stderr: string; spawnError?: Error }> {
+    return new Promise((resolve) => {
+        let child
+        try {
+            child = spawn(cmd, args, { windowsHide: true })
+        } catch (e) {
+            resolve({ code: null, stdout: '', stderr: '', spawnError: e as Error }); return
+        }
+        let stdout = '', stderr = '', done = false
+        const finish = (r: { code: number | null; stdout: string; stderr: string; spawnError?: Error }) => { if (!done) { done = true; if (timer) clearTimeout(timer); resolve(r) } }
+        const timer = opts.timeoutMs ? setTimeout(() => { try { child!.kill() } catch { /* ignore */ } finish({ code: null, stdout, stderr, spawnError: new Error('timeout') }) }, opts.timeoutMs) : undefined
+        child.stdout.on('data', d => { stdout += d.toString() })
+        child.stderr.on('data', d => { stderr += d.toString() })
+        child.on('error', (e) => finish({ code: null, stdout, stderr, spawnError: e }))
+        child.on('close', (code) => finish({ code, stdout, stderr }))
+        if (opts.input !== undefined) { child.stdin.write(opts.input); child.stdin.end() }
+    })
+}
+
+export interface GitLinkStatus {
+    gitInstalled: boolean
+    gitVersion: string | null
+    authenticated: boolean
+    username: string | null
+    tokenValid: boolean | null   // true=有効, false=無効/期限切れ, null=検証不可(オフライン等)
+}
+
+// Git for Windows（git コマンド）が使えるか
+export async function checkGitVersion(): Promise<{ installed: boolean; version: string | null }> {
+    const r = await runProcess('git', ['--version'], { timeoutMs: 10000 })
+    if (r.spawnError || r.code !== 0) return { installed: false, version: null }
+    const m = r.stdout.match(/git version ([^\s]+)/i)
+    return { installed: true, version: m ? m[1] : r.stdout.trim() }
+}
+
+// GitHub 認証情報を取得（未保存なら Git Credential Manager が認証UIを起動して取得・保存する）
+async function fetchGithubCredential(): Promise<{ hasCredential: boolean; username: string | null; password: string | null }> {
+    const input = 'protocol=https\nhost=github.com\n\n'
+    const r = await runProcess('git', ['credential', 'fill'], { input, timeoutMs: 300000 })
+    if (r.spawnError || r.code !== 0) return { hasCredential: false, username: null, password: null }
+    const username = r.stdout.match(/^username=(.*)$/m)?.[1]?.trim() ?? null
+    const password = r.stdout.match(/^password=(.*)$/m)?.[1]?.trim() ?? null
+    return { hasCredential: !!password, username, password }
+}
+
+// 取得したトークンが実際に有効か GitHub API で検証し、ログイン名を得る
+async function validateGithubToken(password: string | null): Promise<{ valid: boolean | null; login: string | null }> {
+    if (!password) return { valid: false, login: null }
+    const call = (scheme: string) => fetch('https://api.github.com/user', {
+        headers: { Authorization: `${scheme} ${password}`, 'User-Agent': 'ModNebula', Accept: 'application/vnd.github+json' }
+    })
+    try {
+        let res = await call('Bearer')
+        if (res.status === 401 || res.status === 403) res = await call('token')
+        if (res.status === 200) {
+            const data = await res.json() as { login?: string }
+            return { valid: true, login: data.login ?? null }
+        }
+        if (res.status === 401 || res.status === 403) return { valid: false, login: null }
+        return { valid: null, login: null }
+    } catch {
+        return { valid: null, login: null } // ネットワーク到達不可などは「検証不可」
+    }
+}
+
+// Git for Windows のインストール確認 ＋ GitHub 認証（＝連携状態の総合チェック）。トークンはクライアントへ返さない。
+export async function checkGitLink(): Promise<GitLinkStatus> {
+    const ver = await checkGitVersion()
+    if (!ver.installed) {
+        return { gitInstalled: false, gitVersion: null, authenticated: false, username: null, tokenValid: null }
+    }
+    const cred = await fetchGithubCredential()
+    if (!cred.hasCredential) {
+        return { gitInstalled: true, gitVersion: ver.version, authenticated: false, username: null, tokenValid: null }
+    }
+    const v = await validateGithubToken(cred.password)
+    return {
+        gitInstalled: true,
+        gitVersion: ver.version,
+        authenticated: v.valid !== false,          // 無効と断定された場合のみ未認証扱い
+        username: v.login ?? cred.username,
+        tokenValid: v.valid
+    }
+}
 
 // ROOT から git リポジトリへコピーするターゲット
 const SYNC_TARGETS = ['modpacks', 'repo', 'servers', 'meta']

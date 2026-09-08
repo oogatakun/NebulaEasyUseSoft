@@ -222,6 +222,34 @@
   .log-entry.debug { color: #8b949e; }
   .log-entry.done-ok { color: var(--success); font-weight: bold; }
   .log-entry.done-fail { color: var(--error); font-weight: bold; }
+  /* 分かりやすいエラーブロック */
+  .err-block {
+    border: 1px solid var(--error);
+    border-left: 4px solid var(--error);
+    background: rgba(244,67,54,0.08);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin: 6px 0;
+    white-space: normal;
+    word-break: break-word;
+  }
+  .err-block .err-title { color: var(--error); font-weight: bold; font-size: 0.95rem; margin-bottom: 4px; }
+  .err-block .err-hint { color: var(--text); font-size: 0.85rem; margin: 4px 0; }
+  .err-block .err-hint b { color: var(--warn); }
+  .err-block .err-detail-toggle { color: var(--text-muted); font-size: 0.78rem; cursor: pointer; text-decoration: underline; user-select: none; }
+  .err-block .err-detail { color: var(--text-muted); font-size: 0.78rem; margin-top: 6px; white-space: pre-wrap; word-break: break-all; font-family: 'Consolas', monospace; }
+  /* Git 連携ステータス */
+  .gl-verdict { padding: 10px 12px; border-radius: 6px; font-weight: bold; font-size: 0.95rem; border: 1px solid transparent; }
+  .gl-row { padding: 4px 0; font-size: 0.88rem; }
+  .gl-help { margin-top: 8px; font-size: 0.82rem; }
+  .gl-help a { color: var(--warn); }
+  .gl-ok { color: var(--success); }
+  .gl-bad { color: var(--error); }
+  .gl-warn { color: var(--warn); }
+  .gl-muted { color: var(--text-muted); }
+  .gl-verdict.gl-ok { background: rgba(76,175,80,0.12); border-color: var(--success); }
+  .gl-verdict.gl-bad { background: rgba(244,67,54,0.10); border-color: var(--error); }
+  .gl-verdict.gl-warn { background: rgba(255,152,0,0.12); border-color: var(--warn); }
 
   h2 { font-size: 1.1rem; margin-bottom: 16px; color: var(--accent); }
   .form-group { margin-bottom: 14px; }
@@ -238,6 +266,52 @@
     transition: border-color 0.15s;
   }
   input:focus { border-color: var(--accent); }
+  /* カスタムプロファイル選択ドロップダウン（ネイティブ<select>の描画不具合回避） */
+  .profile-dd {
+    padding: 8px 10px;
+    background: var(--surface2);
+    border: 1px solid #444;
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 0.9rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    position: relative;
+    user-select: none;
+    transition: border-color 0.15s;
+  }
+  .profile-dd:focus, .profile-dd.open { border-color: var(--accent); outline: none; }
+  .profile-dd .pd-caret { opacity: 0.7; transition: transform 0.15s; }
+  .profile-dd.open .pd-caret { transform: rotate(180deg); }
+  .profile-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: var(--surface);
+    border: 1px solid #444;
+    border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+    max-height: 260px;
+    overflow-y: auto;
+    z-index: 300;
+    padding: 4px;
+  }
+  .profile-menu .pm-item {
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.9rem;
+  }
+  .profile-menu .pm-item:hover { background: rgba(233,69,96,0.18); }
+  .profile-menu .pm-item.active { background: rgba(233,69,96,0.28); font-weight: 600; }
+  .profile-menu .pm-empty { padding: 8px 10px; color: var(--text-muted); font-size: 0.85rem; }
   .checkbox-group { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
   .checkbox-group input { width: auto; }
   .checkbox-group label { margin: 0; color: var(--text); }
@@ -705,7 +779,13 @@
           <div class="card" style="margin-bottom:14px;">
             <div class="card-title">プロファイル</div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-              <select id="profile-select" class="form-input" style="flex:1;min-width:120px;margin:0" onchange="switchProfile(this.value)"></select>
+              <div id="profile-dropdown" class="profile-dd" style="flex:1;min-width:120px" tabindex="0" role="button" aria-haspopup="listbox"
+                   onclick="toggleProfileMenu(event)"
+                   onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleProfileMenu(event)}else if(event.key==='Escape'){closeProfileMenu()}">
+                <span id="profile-current" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">プロファイルなし</span>
+                <span class="pd-caret">▾</span>
+                <div id="profile-menu" class="profile-menu" hidden></div>
+              </div>
               <button class="btn btn-secondary nolock" style="margin:0;white-space:nowrap" onclick="toggleAddProfile()">＋ 追加</button>
               <button class="btn btn-secondary nolock" style="margin:0;white-space:nowrap;color:#e74c3c" id="btn-del-profile" onclick="deleteProfile()">🗑 削除</button>
             </div>
@@ -912,6 +992,16 @@
         <div class="page" id="page-github">
           <h2>🐙 GitHub 連携</h2>
 
+          <!-- 連携状態カード -->
+          <div class="card" style="margin-bottom:12px;">
+            <div class="card-title">連携状態</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <button class="btn nolock" id="btn-git-link" style="margin:0" onclick="checkGitLink()">🔗 Git連携を確認・認証</button>
+              <span id="git-link-hint" style="color:var(--text-muted);font-size:0.8rem;">Git for Windows の有無と GitHub 認証をまとめて確認します。未認証の場合はサインイン画面が表示されます。</span>
+            </div>
+            <div id="git-link-status" style="margin-top:12px;"></div>
+          </div>
+
           <!-- 設定カード -->
           <div class="card" style="margin-bottom:12px;">
             <div class="card-title">リポジトリ設定</div>
@@ -1049,11 +1139,13 @@ es.onmessage = (e) => {
     } else if (data.type === 'start') {
       markRunning()
     } else if (data.type === 'done') {
-      markIdle(data.success ? 'ok' : 'fail', data.success ? '完了' : 'エラー')
       if (data.success) {
+        markIdle('ok', '完了')
         appendLog('done-ok', '✓ 完了しました')
       } else {
-        appendLog('done-fail', `✗ エラー${data.error ? ': ' + data.error : ''}`)
+        const title = appendErrorLog(data.error)      // 分かりやすいエラーを表示
+        markIdle('fail', title.length > 22 ? title.slice(0, 22) + '…' : title) // ステータスにも要約
+        revealLogOnError()                            // ログが隠れていても気づけるように
       }
     }
   } catch (err) { console.error('SSE handler error', err) }
@@ -1078,11 +1170,109 @@ function appendLog(level, message) {
   logEl.scrollTop = logEl.scrollHeight
 }
 
+// 生のエラー文字列を分かりやすい日本語（原因＋対処）に分類する
+function explainError(raw) {
+  const s = String(raw ?? '').trim()
+  const low = s.toLowerCase()
+  const has = (...ws) => ws.some(w => low.includes(w))
+  // detail は先頭の "Error:" を除いた技術的な原文
+  const detail = s.replace(/^error:\s*/i, '')
+
+  // Git 未インストール
+  if (has('spawn') && has('git') && has('enoent')) return { title: 'Git for Windows が見つかりません', hint: '<b>Git for Windows</b> をインストールしてください（gitforwindows.org）。インストール後に「Git連携を確認・認証」をお試しください。', detail }
+
+  // Java 未検出／未設定
+  if (has('spawn') && has('java') && has('enoent')) return { title: 'Java が見つかりません', hint: '環境設定のプロファイルで <b>JAVA_EXECUTABLE</b> に java.exe（または java）の正しいパスを設定してください。Java 未インストールの場合はインストールが必要です。', detail }
+  if (has("'file' argument", 'argument must be of type string') && (has('java') || has('undefined'))) return { title: 'Java の実行パスが未設定です', hint: '環境設定のプロファイルで <b>JAVA_EXECUTABLE</b> に java.exe のパスを設定してください。', detail }
+  if (has('unsupportedclassversion') || has('has been compiled by a more recent')) return { title: 'Java のバージョンが対応していません', hint: 'より新しいバージョンの Java（JDK/JRE）をインストールし、JAVA_EXECUTABLE を更新してください。', detail }
+
+  // ネットワーク
+  if (has('enotfound', 'eai_again', 'getaddrinfo')) return { title: 'サーバーに接続できません（名前解決に失敗）', hint: 'インターネット接続、プロキシ設定、URL（BASE_URL）が正しいかを確認してください。', detail }
+  if (has('etimedout', 'timeout', 'socket hang up')) return { title: '接続がタイムアウトしました', hint: 'ネットワークが不安定か、相手サーバーが応答していません。時間をおいて再試行してください。', detail }
+  if (has('econnrefused')) return { title: '接続を拒否されました', hint: '接続先のポート/URL が正しいか、対象サーバーが起動しているかを確認してください。', detail }
+  if (has('econnreset', 'network', 'fetch failed')) return { title: 'ネットワークエラーが発生しました', hint: 'インターネット接続を確認し、もう一度お試しください。', detail }
+
+  // HTTP ステータス
+  if (has('429', 'too many requests')) return { title: 'リクエストが多すぎます（429）', hint: 'しばらく待ってから再試行してください。CurseForge/Forge などのAPI制限の可能性があります。', detail }
+  if (has('403', 'forbidden')) return { title: 'アクセスが拒否されました（403）', hint: 'APIキー（CURSEFORGE_API_KEY など）や権限の設定を確認してください。', detail }
+  if (has('404', 'not found')) return { title: '対象が見つかりません（404）', hint: '指定したバージョン名・ID・URL が正しいかを確認してください。', detail }
+  if (has('401', 'unauthorized')) return { title: '認証に失敗しました（401）', hint: 'APIキーやトークンの設定を確認してください。', detail }
+
+  // ファイル/権限
+  if (has('eacces', 'eperm', 'permission denied', 'operation not permitted')) return { title: 'アクセス権限がありません', hint: 'フォルダの書き込み権限、管理者権限、ウイルス対策の「フォルダ保護」、他プロセスによるロックを確認してください。', detail }
+  if (has('ebusy', 'resource busy', 'being used by another')) return { title: 'ファイルが使用中です', hint: '対象ファイルを開いているアプリ（Minecraft/エディタ等）を閉じてから再試行してください。', detail }
+  if (has('enospc', 'no space')) return { title: 'ディスクの空き容量が不足しています', hint: '不要なファイルを削除して空き容量を確保してから再試行してください。', detail }
+  if (has('enoent')) {
+    const m = s.match(/['"]([A-Za-z]:[\\/][^'"]+|\/[^'"]+)['"]/)
+    return { title: 'ファイルまたはフォルダが見つかりません', hint: (m ? `対象: <b>${m[1]}</b><br>` : '') + 'パス（ROOT ディレクトリ、ZIP名など）が正しいかを確認してください。', detail }
+  }
+
+  // 設定不足（アプリ自身のメッセージ。ほぼ日本語なのでそのまま活かす）
+  if (has('root') && (has('未設定') || has('not set') || has('undefined'))) return { title: 'ROOT ディレクトリが未設定です', hint: '環境設定で ROOT ディレクトリに配布生成先のパスを指定してください。', detail }
+  if (has('base_url') && (has('未設定') || has('not set'))) return { title: 'BASE_URL が未設定です', hint: '環境設定で配布ファイルのベースURLを設定してください。', detail }
+
+  // JSON / 応答解釈
+  if (has('unexpected token', 'json', 'is not valid json')) return { title: 'サーバーからの応答を解釈できませんでした', hint: '通信が途中で切れたか、想定外の応答が返りました。時間をおいて再試行してください。', detail }
+
+  // 該当なし → 原文をそのまま提示
+  return { title: 'エラーが発生しました', hint: '下の詳細を確認してください。解決しない場合はこの内容を添えてお問い合わせください。', detail: detail || s || '（詳細不明）' }
+}
+
+// 分かりやすいエラーブロックをログに追加し、分類結果のタイトルを返す
+function appendErrorLog(raw) {
+  const { title, hint, detail } = explainError(raw)
+  const block = document.createElement('div')
+  block.className = 'log-entry err-block'
+
+  const t = document.createElement('div')
+  t.className = 'err-title'
+  t.textContent = '❌ ' + title
+  block.appendChild(t)
+
+  if (hint) {
+    const h = document.createElement('div')
+    h.className = 'err-hint'
+    h.innerHTML = '💡 ' + hint
+    block.appendChild(h)
+  }
+
+  if (detail && detail !== title) {
+    const toggle = document.createElement('span')
+    toggle.className = 'err-detail-toggle'
+    toggle.textContent = '技術的な詳細を表示'
+    const det = document.createElement('div')
+    det.className = 'err-detail'
+    det.textContent = detail
+    det.hidden = true
+    toggle.addEventListener('click', () => {
+      det.hidden = !det.hidden
+      toggle.textContent = det.hidden ? '技術的な詳細を表示' : '技術的な詳細を隠す'
+    })
+    block.appendChild(toggle)
+    block.appendChild(det)
+  }
+
+  logEl.appendChild(block)
+  logEl.scrollTop = logEl.scrollHeight
+  return title
+}
+
 function toggleLogPanel() {
   const panel = document.getElementById('log-panel')
   const closeBtn = document.getElementById('log-close-btn')
   const isOpen = panel.classList.toggle('log-open')
   closeBtn.style.display = isOpen ? 'inline-block' : 'none'
+}
+
+// エラー時、狭い画面でログが隠れている場合は自動で開いて気づけるようにする
+function revealLogOnError() {
+  const panel = document.getElementById('log-panel')
+  const narrow = window.matchMedia('(max-width: 780px)').matches
+  if (narrow && !panel.classList.contains('log-open')) {
+    panel.classList.add('log-open')
+    const closeBtn = document.getElementById('log-close-btn')
+    if (closeBtn) closeBtn.style.display = 'inline-block'
+  }
 }
 
 function clearLog() {
@@ -1126,24 +1316,83 @@ async function readError(r) {
 let currentConfig = {}
 
 let currentProfileName = ''
+let profileList = []
+
+function setProfileHeader(text) {
+  const cur = document.getElementById('profile-current')
+  if (cur) cur.textContent = text
+}
+
+// カスタムドロップダウンの開閉
+function closeProfileMenu() {
+  const dd = document.getElementById('profile-dropdown')
+  const menu = document.getElementById('profile-menu')
+  if (menu) menu.hidden = true
+  if (dd) dd.classList.remove('open')
+}
+async function toggleProfileMenu(event) {
+  if (event) event.stopPropagation()
+  const menu = document.getElementById('profile-menu')
+  if (!menu.hidden) { closeProfileMenu(); return }
+  await openProfileMenu()
+}
+// 開くたびに最新の一覧を取得 → 空リスト/取りこぼしを自己修復
+async function openProfileMenu() {
+  const dd = document.getElementById('profile-dropdown')
+  const menu = document.getElementById('profile-menu')
+  menu.innerHTML = '<div class="pm-empty">読み込み中...</div>'
+  menu.hidden = false
+  dd.classList.add('open')
+  try {
+    const pr = await fetch('/api/profiles')
+    if (!pr.ok) throw new Error(await readError(pr))
+    const { active, profiles } = await pr.json()
+    currentProfileName = active
+    profileList = profiles
+    document.getElementById('btn-del-profile').disabled = profiles.length === 0
+    setProfileHeader(profiles.length === 0 ? 'プロファイルなし' : (active || profiles[0]))
+    renderProfileMenu(profiles, active)
+  } catch (e) {
+    console.error('openProfileMenu failed', e)
+    menu.innerHTML = '<div class="pm-empty">読み込みに失敗しました。もう一度クリックしてください。</div>'
+  }
+}
+function renderProfileMenu(profiles, active) {
+  const menu = document.getElementById('profile-menu')
+  if (!profiles || profiles.length === 0) {
+    menu.innerHTML = '<div class="pm-empty">プロファイルがありません。「＋ 追加」で作成してください。</div>'
+    return
+  }
+  menu.innerHTML = ''
+  profiles.forEach(n => {
+    const item = document.createElement('div')
+    item.className = 'pm-item' + (n === active ? ' active' : '')
+    item.textContent = n
+    item.title = n
+    item.addEventListener('click', (ev) => {
+      ev.stopPropagation()
+      closeProfileMenu()
+      switchProfile(n)
+    })
+    menu.appendChild(item)
+  })
+}
 
 async function loadConfig() {
-  const sel = document.getElementById('profile-select')
   const delBtn = document.getElementById('btn-del-profile')
   try {
     const pr = await fetch('/api/profiles')
     if (!pr.ok) throw new Error(await readError(pr))
     const { active, profiles } = await pr.json()
     currentProfileName = active
+    profileList = profiles
     if (profiles.length === 0) {
-      sel.innerHTML = '<option value="" disabled selected>プロファイルなし</option>'
+      setProfileHeader('プロファイルなし')
       delBtn.disabled = true
       applyConfigToUI({})
       return
     }
-    sel.innerHTML = profiles.map(n =>
-      `<option value="${n}" ${n === active ? 'selected' : ''}>${n}</option>`
-    ).join('')
+    setProfileHeader(active || profiles[0])
     delBtn.disabled = false
 
     const cr = await fetch('/api/config')
@@ -1152,26 +1401,22 @@ async function loadConfig() {
     currentConfig = cfg
     applyConfigToUI(cfg)
   } catch (e) {
-    // 読み込み失敗でUIが壊れないようにする（次の操作は引き続き可能）
+    // 読み込み失敗でUIが壊れないようにする（クリックで再取得＝自己修復）
     console.error('loadConfig failed', e)
-    sel.innerHTML = '<option value="" disabled selected>読み込み失敗</option>'
+    profileList = []
+    setProfileHeader('読み込み失敗（クリックで再試行）')
     delBtn.disabled = true
   }
 }
 
 async function switchProfile(name) {
-  const sel = document.getElementById('profile-select')
   // 同じプロファイルを選び直した場合は何もしない
   if (name === currentProfileName) return
   try {
     const r = await fetch(`/api/profiles/${encodeURIComponent(name)}/activate`, { method: 'POST' })
-    if (!r.ok) {
-      alert('切り替えに失敗しました:\n' + await readError(r))
-      sel.value = currentProfileName // 元に戻し、同じ項目でも再試行できるようにする
-      return
-    }
+    if (!r.ok) { alert('切り替えに失敗しました:\n' + await readError(r)); return }
     currentProfileName = name
-    sel.value = name
+    setProfileHeader(name)
     const { profile } = await r.json()
     const cfg = { ROOT: profile.ROOT ?? '', BASE_URL: profile.BASE_URL ?? '', JAVA_EXECUTABLE: profile.JAVA_EXECUTABLE ?? '', HELIOS_DATA_FOLDER: profile.HELIOS_DATA_FOLDER ?? '' }
     currentConfig = cfg
@@ -1182,7 +1427,6 @@ async function switchProfile(name) {
     setTimeout(() => { saved.style.display = 'none'; saved.textContent = '✓ 保存しました' }, 2500)
   } catch (e) {
     alert('切り替え中にエラーが発生しました:\n' + e)
-    sel.value = currentProfileName
   }
 }
 
@@ -1203,7 +1447,6 @@ async function addProfile() {
   document.getElementById('new-profile-name').value = ''
   document.getElementById('add-profile-row').style.display = 'none'
   await loadConfig()
-  document.getElementById('profile-select').value = name
   await switchProfile(name)
 }
 
@@ -1698,6 +1941,78 @@ function gitProgressDone(message, isError = false) {
   }, 5000)
 }
 
+// Git 操作の失敗を分かりやすく表示（進捗バーには要約、ログに詳細ブロック）
+function gitError(prefix, raw) {
+  const { title } = explainError(raw)
+  gitProgressDone(`✗ ${prefix}: ${title}`, true)
+  appendErrorLog(raw)
+  revealLogOnError()
+}
+
+// Git for Windows の有無 ＋ GitHub 認証をまとめて確認・実行
+async function checkGitLink() {
+  const btn = document.getElementById('btn-git-link')
+  const box = document.getElementById('git-link-status')
+  const orig = btn.textContent
+  btn.disabled = true
+  btn.textContent = '確認中...'
+  box.innerHTML = '<div class="gl-row gl-muted">確認しています。未認証の場合はサインイン画面（ブラウザ）が表示されるまでお待ちください...</div>'
+  try {
+    const r = await fetch('/api/git/link', { method: 'POST' })
+    if (!r.ok) { box.innerHTML = '<div class="gl-row gl-bad">❌ 確認に失敗しました</div>'; appendErrorLog(await readError(r)); revealLogOnError(); return }
+    renderGitLink(await r.json())
+  } catch (e) {
+    box.innerHTML = '<div class="gl-row gl-bad">❌ 確認に失敗しました</div>'
+    appendErrorLog(String(e)); revealLogOnError()
+  } finally {
+    btn.disabled = false
+    btn.textContent = orig
+  }
+}
+
+function renderGitLink(s) {
+  const box = document.getElementById('git-link-status')
+  // Git for Windows 行
+  const gitRow = s.gitInstalled
+    ? `<div class="gl-row gl-ok">✅ Git for Windows：インストール済み${s.gitVersion ? '（v' + s.gitVersion + '）' : ''}</div>`
+    : `<div class="gl-row gl-bad">❌ Git for Windows：未インストール</div>`
+
+  // GitHub 認証 行
+  let authRow
+  if (!s.gitInstalled) {
+    authRow = `<div class="gl-row gl-muted">— GitHub 認証：Git 未インストールのため確認できません</div>`
+  } else if (s.authenticated && s.tokenValid === true) {
+    authRow = `<div class="gl-row gl-ok">✅ GitHub 認証：認証済み${s.username ? '（' + s.username + '）' : ''}</div>`
+  } else if (s.authenticated && s.tokenValid === null) {
+    authRow = `<div class="gl-row gl-warn">🟡 GitHub 認証：認証情報あり（オフラインのため有効性は未検証）${s.username ? '（' + s.username + '）' : ''}</div>`
+  } else if (s.tokenValid === false) {
+    authRow = `<div class="gl-row gl-bad">❌ GitHub 認証：認証情報が無効または期限切れです（もう一度このボタンで再認証してください）</div>`
+  } else {
+    authRow = `<div class="gl-row gl-bad">❌ GitHub 認証：未認証</div>`
+  }
+
+  // 総合判定
+  let verdict
+  if (s.gitInstalled && s.authenticated) {
+    verdict = `<div class="gl-verdict gl-ok">🎉 連携済み — コミット＆プッシュが利用できます</div>`
+  } else if (!s.gitInstalled && !s.authenticated) {
+    verdict = `<div class="gl-verdict gl-bad">未連携 — Git for Windows のインストールと GitHub 認証の両方が必要です</div>`
+  } else if (s.gitInstalled && !s.authenticated) {
+    verdict = `<div class="gl-verdict gl-warn">あと一歩 — Git はありますが GitHub が未認証です。もう一度このボタンを押してサインインしてください。</div>`
+  } else {
+    verdict = `<div class="gl-verdict gl-warn">あと一歩 — GitHub 認証はありますが Git for Windows が未インストールです。</div>`
+  }
+
+  const help = !s.gitInstalled
+    ? `<div class="gl-help" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;">
+         <button class="btn nolock" style="margin:0;background:#1a5c2e;border-color:#2d8a4e;white-space:nowrap" onclick="window.open('https://gitforwindows.org/','_blank')">⬇ Git for Windows をダウンロード</button>
+         <span style="color:var(--text-muted);font-size:0.8rem">インストール後、もう一度「Git連携を確認・認証」を押してください</span>
+       </div>`
+    : ''
+
+  box.innerHTML = verdict + `<div style="margin-top:8px">${gitRow}${authRow}</div>` + help
+}
+
 async function gitSync() {
   gitProgressStart('📂 ファイルをコピー中...')
   const r = await fetch('/api/git/sync', { method: 'POST' })
@@ -1705,7 +2020,7 @@ async function gitSync() {
   if (r.ok) {
     gitProgressDone(`✓ コピー完了: ${data.copied.join(', ')}`)
     await refreshGitStatus()
-  } else { gitProgressDone('✗ コピー失敗: ' + data.error, true) }
+  } else { gitError('コピー失敗', data.error) }
 }
 
 async function gitFetch() {
@@ -1713,7 +2028,7 @@ async function gitFetch() {
   const r = await fetch('/api/git/fetch', { method: 'POST' })
   const data = await r.json()
   if (r.ok) { gitProgressDone('✓ ' + data.message); await refreshGitStatus() }
-  else { gitProgressDone('✗ フェッチ失敗: ' + data.error, true) }
+  else { gitError('フェッチ失敗', data.error) }
 }
 
 async function gitPull() {
@@ -1721,7 +2036,7 @@ async function gitPull() {
   const r = await fetch('/api/git/pull', { method: 'POST' })
   const data = await r.json()
   if (r.ok) { gitProgressDone('✓ ' + data.message); await refreshGitStatus(); await refreshGitLog() }
-  else { gitProgressDone('✗ プル失敗: ' + data.error, true) }
+  else { gitError('プル失敗', data.error) }
 }
 
 async function gitCommitPush() {
@@ -1733,7 +2048,7 @@ async function gitCommitPush() {
   })
   const data = await r.json()
   if (r.ok) { gitProgressDone('✓ ' + data.message); await refreshGitStatus(); await refreshGitLog() }
-  else { gitProgressDone('✗ 失敗: ' + data.error, true) }
+  else { gitError('コミット＆プッシュ失敗', data.error) }
 }
 
 function closeDetail() {
@@ -2145,6 +2460,12 @@ loadNavState()
 
 loadPanelWidths()
 initResizer('resizer-log', () => document.querySelector('.form-panel'), RESIZE_MIN.form, RESIZE_MAX.form)
+
+// ドロップダウン外をクリックしたら閉じる
+document.addEventListener('click', (e) => {
+  const dd = document.getElementById('profile-dropdown')
+  if (dd && !dd.contains(e.target)) closeProfileMenu()
+})
 
 loadConfig()
 

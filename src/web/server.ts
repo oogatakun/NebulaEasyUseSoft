@@ -7,7 +7,7 @@ import { spawn } from 'child_process'
 import multer from 'multer'
 import dotenv from 'dotenv'
 import { sseManager } from './SseLogTransport.js'
-import { getGitStatus, syncToRepo, gitFetch, gitPull, gitCommitPush, getLog } from './git.js'
+import { getGitStatus, syncToRepo, gitFetch, gitPull, gitCommitPush, getLog, checkGitLink } from './git.js'
 import {
     cmdInitRoot,
     cmdGenerateServer,
@@ -279,7 +279,7 @@ async function versionQuery(res: express.Response, fn: () => Promise<unknown>): 
         sseManager.broadcast({ type: 'done', success: true })
         res.json({ ok: true, result })
     } catch (e) {
-        sseManager.broadcast({ type: 'done', success: false })
+        sseManager.broadcast({ type: 'done', success: false, error: String(e) })
         res.status(500).json({ error: String(e) })
     }
 }
@@ -594,6 +594,12 @@ app.post('/api/pick-folder', (_req, res) => {
         const path = out.trim().split('\n').pop()?.trim() ?? ''
         res.json({ path })
     })
+})
+
+// Git for Windows のインストール確認 ＋ GitHub 認証（連携状態チェック）
+app.post('/api/git/link', async (_req, res) => {
+    try { res.json(await checkGitLink()) }
+    catch (e) { res.status(500).json({ error: String(e) }) }
 })
 
 app.get('/api/git/config', (_req, res) => { res.json(getGitConfig()) })
