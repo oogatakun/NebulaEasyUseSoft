@@ -1049,7 +1049,7 @@
 
           <!-- 操作ボタン -->
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
-            <button class="btn" id="btn-git-sync" onclick="gitSync()">📂 ROOT → リポジトリへコピー</button>
+            <button class="btn" id="btn-git-sync" onclick="gitSync()">📂 ROOT → リポジトリへ置き換え</button>
             <button class="btn" id="btn-git-sync-from" onclick="gitSyncFrom()">📥 リポジトリ → ROOTへコピー</button>
             <button class="btn" id="btn-git-fetch" onclick="gitFetch()">⬇ フェッチ</button>
             <button class="btn" id="btn-git-pull" onclick="gitPull()">⬇ プル</button>
@@ -2031,13 +2031,14 @@ function renderGitLink(s) {
 }
 
 async function gitSync() {
-  gitProgressStart('📂 ファイルをコピー中...')
+  if (!confirm('ROOT の内容でリポジトリを「置き換え」ます。\n\n・対象フォルダ（modpacks / repo / servers / meta）と distribution.json を ROOT と完全一致させます\n・ROOT で移動・削除したファイルはリポジトリ側からも削除されます\n\nよろしいですか？')) return
+  gitProgressStart('📂 リポジトリを ROOT で置き換え中...')
   const r = await fetch('/api/git/sync', { method: 'POST' })
   const data = await r.json()
   if (r.ok) {
-    gitProgressDone(`✓ コピー完了: ${data.copied.join(', ')}`)
+    gitProgressDone(`✓ 置き換え完了: ${data.copied.join(', ')}`)
     await refreshGitStatus()
-  } else { gitError('コピー失敗', data.error) }
+  } else { gitError('置き換え失敗', data.error) }
 }
 
 async function gitRemoveDistribution() {

@@ -1,5 +1,5 @@
 import { simpleGit, SimpleGit, StatusResult } from 'simple-git'
-import { existsSync, cpSync, unlinkSync } from 'fs'
+import { existsSync, cpSync, unlinkSync, rmSync } from 'fs'
 import { resolve as resolvePath, join } from 'path'
 import { spawn } from 'child_process'
 
@@ -119,6 +119,9 @@ export async function getGitStatus(repoPath: string): Promise<GitStatus> {
     }
 }
 
+// ROOT → リポジトリへ「置き換え（ミラー）」コピー。
+// 各対象フォルダはコピー前にリポジトリ側を削除してから複製するため、
+// ROOT で移動・削除したファイルはリポジトリ側からも消え、ROOT と完全一致する。
 export async function syncToRepo(rootPath: string, repoPath: string): Promise<string[]> {
     const copied: string[] = []
 
@@ -126,8 +129,14 @@ export async function syncToRepo(rootPath: string, repoPath: string): Promise<st
         const src = join(resolvePath(rootPath), dir)
         const dest = join(resolvePath(repoPath), dir)
         if (existsSync(src)) {
+            // 置き換え: 既存の対象フォルダを削除してから丸ごとコピー（余分なファイルを除去）
+            if (existsSync(dest)) rmSync(dest, { recursive: true, force: true })
             cpSync(src, dest, { recursive: true, force: true })
             copied.push(dir)
+        } else if (existsSync(dest)) {
+            // ROOT 側に対象が無い場合はリポジトリ側からも除去（完全ミラー）
+            rmSync(dest, { recursive: true, force: true })
+            copied.push(`${dir} (削除)`)
         }
     }
 
@@ -135,8 +144,11 @@ export async function syncToRepo(rootPath: string, repoPath: string): Promise<st
         const src = join(resolvePath(rootPath), file)
         const dest = join(resolvePath(repoPath), file)
         if (existsSync(src)) {
-            cpSync(src, dest)
+            cpSync(src, dest, { force: true })
             copied.push(file)
+        } else if (existsSync(dest)) {
+            rmSync(dest, { force: true })
+            copied.push(`${file} (削除)`)
         }
     }
 
