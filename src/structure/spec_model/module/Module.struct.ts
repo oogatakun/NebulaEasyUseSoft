@@ -2,7 +2,7 @@ import { minimatch } from 'minimatch'
 import { createHash } from 'crypto'
 import { pathExists } from 'fs-extra/esm'
 import { Stats } from 'fs'
-import { lstat, readdir, readFile, writeFile, unlink } from 'fs/promises'
+import { lstat, readdir, readFile } from 'fs/promises'
 import { Artifact, Module, Type, TypeMetadata } from 'helios-distribution-types'
 import { resolve } from 'path'
 import { BaseModelStructure } from '../BaseModel.struct.js'
@@ -11,7 +11,6 @@ import { ClaritasResult, ClaritasModuleMetadata } from '../../../model/claritas/
 import { ClaritasWrapper } from '../../../util/java/ClaritasWrapper.js'
 import { MinecraftVersion } from '../../../util/MinecraftVersion.js'
 import { UntrackedFilesOption } from '../../../model/nebula/ServerMeta.js'
-import merge from 'lodash.merge'
 
 export interface ModuleCandidate {
     file: string
@@ -133,17 +132,16 @@ export abstract class ModuleStructure extends BaseModelStructure<Module> {
             mdl.artifact.path = pth
         }
 
-        // If file and its link file both exist, write module data to link file and delete artifact file.
+        // jar と .link.json が両方存在する場合は、jar を残したまま link ファイルの
+        // 上書き項目（主に id）だけを適用する。これにより「配信名（id）を修正しつつ、
+        // jar はリポジトリ上に残す」ことができ、リポジトリを ROOT で置き換える運用でも
+        // URL が壊れない。二重取り込みは discovery 側（.link.json 候補を除外）で防ぐ。
         if (await pathExists(`${filePath}.link.json`)) {
-            this.logger.info(`Found additional link file: ${filePath}.link.json, ${file}`)
-            // Module data loaded from link file.
-            const linkModule = JSON.parse(await readFile(`${filePath}.link.json`, { encoding: 'utf-8' })) as Module
-            // Add link file's properties to module.
-            merge(mdl, linkModule)
-            // Save link file's properties.
-            await writeFile(`${filePath}.link.json`, JSON.stringify(mdl, null, 2))
-            // Delete artifact file.
-            await unlink(filePath)
+            this.logger.info(`Found link override: ${filePath}.link.json`)
+            const linkModule = JSON.parse(await readFile(`${filePath}.link.json`, { encoding: 'utf-8' })) as Partial<Module>
+            if (linkModule.id) mdl.id = linkModule.id       // 配信名を決める id を上書き
+            if (linkModule.name) mdl.name = linkModule.name // 表示名も指定があれば上書き
+            // artifact（url/MD5/size）や required は jar 側の最新値を維持する
         }
 
         return mdl
@@ -156,6 +154,13 @@ export abstract class ModuleStructure extends BaseModelStructure<Module> {
         if (await pathExists(scanDirectory)) {
             const files = await readdir(scanDirectory)
             for (const file of files) {
+                // 対象 jar が存在する .link.json は候補から除外する。
+                // （jar 側の parseModule で id 上書きを適用するため。両方を候補にすると
+                //   同一 id のエントリが二重に生成されてしまう）
+                const linkMatch = /^(.+)\.link\.json$/i.exec(file)
+                if (linkMatch != null && files.includes(linkMatch[1])) {
+                    continue
+                }
                 const filePath = resolve(scanDirectory, file)
                 const stats = await lstat(filePath)
                 if (stats.isFile()) {

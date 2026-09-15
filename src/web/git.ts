@@ -1,5 +1,5 @@
 import { simpleGit, SimpleGit, StatusResult } from 'simple-git'
-import { existsSync, cpSync } from 'fs'
+import { existsSync, cpSync, unlinkSync } from 'fs'
 import { resolve as resolvePath, join } from 'path'
 import { spawn } from 'child_process'
 
@@ -191,6 +191,30 @@ export async function gitCommitPush(repoPath: string, message: string, branch: s
     }
     await git.push('origin', branch)
     return `コミット＆プッシュ完了。(${commit.commit})`
+}
+
+// distribution.json をリポジトリから削除してコミット＆プッシュする
+// （再生成しても内容が同一だと git が差分なしと判断して反映されない問題への対処用）
+export async function removeDistributionAndCommit(repoPath: string, branch: string, fileName = 'distribution.json'): Promise<string> {
+    const git = simpleGit(repoPath)
+    const abs = join(resolvePath(repoPath), fileName)
+    if (!existsSync(abs)) {
+        return `${fileName} はリポジトリに存在しません（削除は不要です）。`
+    }
+    // git 管理下なら git rm、未追跡ならファイル削除のみ
+    let tracked = true
+    try {
+        await git.rm(fileName)
+    } catch {
+        tracked = false
+        try { unlinkSync(abs) } catch { /* ignore */ }
+    }
+    if (!tracked) {
+        return `${fileName} を削除しました（未追跡のためコミットは不要です）。`
+    }
+    const commit = await git.commit(`Remove ${fileName}`)
+    await git.push('origin', branch)
+    return `${fileName} を削除してコミット＆プッシュしました。(${commit.commit})`
 }
 
 export async function getLog(repoPath: string, count = 10): Promise<Array<{ hash: string; date: string; message: string; author: string }>> {

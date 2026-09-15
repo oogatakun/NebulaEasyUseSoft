@@ -1,13 +1,15 @@
 import express from 'express'
 import { resolve as resolvePath, join, relative, basename, dirname } from 'path'
-import { fileURLToPath } from 'url'
+import { fileURLToPath, pathToFileURL } from 'url'
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, unlinkSync } from 'fs'
 import { readdir, readFile, stat, unlink, rename, mkdir } from 'fs/promises'
 import { spawn } from 'child_process'
+import { createHash } from 'crypto'
+import StreamZip from 'node-stream-zip'
 import multer from 'multer'
 import dotenv from 'dotenv'
 import { sseManager } from './SseLogTransport.js'
-import { getGitStatus, syncToRepo, syncFromRepo, gitFetch, gitPull, gitCommitPush, getLog, checkGitLink } from './git.js'
+import { getGitStatus, syncToRepo, syncFromRepo, gitFetch, gitPull, gitCommitPush, getLog, checkGitLink, removeDistributionAndCommit } from './git.js'
 import {
     cmdInitRoot,
     cmdGenerateServer,
@@ -449,6 +451,93 @@ app.post('/api/servers/:name/move', async (req, res) => {
     } catch (e) { res.status(500).json({ error: String(e) }) }
 })
 
+// --- jar を .link.json 化 ---
+// ファイル名を維持したモジュールIDを持つ <jar>.link.json を作成する。
+// これによりクライアント配置名が元のjarファイル名と一致し、手動インストールと同じ挙動になる。
+function crudeInfer(fileName: string): { name: string; version: string } {
+    const m = /(.+?)-(.+)\.[jJ][aA][rR]$/.exec(fileName)
+    if (m) return { name: m[1], version: m[2] }
+    return { name: fileName.replace(/\.[^.]+$/, ''), version: '0.0.0' }
+}
+
+function readModsTomlDisplayName(jarPath: string): Promise<string | null> {
+    return new Promise((resolve) => {
+        let zip: StreamZip
+        try { zip = new StreamZip({ file: jarPath, storeEntries: true }) } catch { resolve(null); return }
+        zip.on('error', () => { try { zip.close() } catch { /* */ } resolve(null) })
+        zip.on('ready', () => {
+            try {
+                const buf = zip.entryDataSync('META-INF/mods.toml')
+                try { zip.close() } catch { /* */ }
+                const m = buf.toString().match(/displayName\s*=\s*"([^"]*)"/)
+                resolve(m ? m[1] : null)
+            } catch { try { zip.close() } catch { /* */ } resolve(null) }
+        })
+    })
+}
+
+function buildModuleUrl(base: string, relFromRoot: string): string {
+    let b = base.trim()
+    if (!b.includes('//')) {
+        if (b.toLowerCase().startsWith('localhost')) b = 'http://' + b
+        else throw new Error('BASE_URL にプロトコル (http:// または https://) を指定してください')
+    }
+    return new URL(relFromRoot, b).toString()
+}
+
+app.post('/api/servers/:name/link-file', async (req, res) => {
+    const serverDir = getServerDir(req.params.name)
+    const { category, relativePath, customId } = req.body as { category: string; relativePath: string; customId?: string }
+
+    if (!['forgemods', 'fabricmods'].includes(category)) {
+        res.status(400).json({ error: 'link化は forgemods / fabricmods のjarのみ対応です' }); return
+    }
+    if (!relativePath || !/\.jar$/i.test(relativePath) || /\.link\.json$/i.test(relativePath)) {
+        res.status(400).json({ error: 'jarファイルを選択してください' }); return
+    }
+    const jarPath = join(serverDir, category, relativePath)
+    if (!jarPath.startsWith(serverDir)) { res.status(400).json({ error: 'Invalid path' }); return }
+    if (!existsSync(jarPath)) { res.status(404).json({ error: 'ファイルが見つかりません' }); return }
+
+    try {
+        const parts = relativePath.replace(/\\/g, '/').split('/')
+        const namespace = parts.length > 1 ? parts[0] : ''
+        const fileName = basename(relativePath)
+
+        const buf = readFileSync(jarPath)
+        const md5 = createHash('md5').update(buf).digest('hex')
+        const size = statSync(jarPath).size
+
+        const displayName = (await readModsTomlDisplayName(jarPath)) || fileName.replace(/\.jar$/i, '')
+
+        const crude = crudeInfer(fileName)
+        const type = category === 'forgemods' ? 'ForgeMod' : 'FabricMod'
+        const group = `generated.${type.toLowerCase()}`
+        const id = (customId && customId.trim()) ? customId.trim() : `${group}:${crude.name}:${crude.version}@jar`
+
+        const relFromRoot = `servers/${req.params.name}/${category}/${relativePath.replace(/\\/g, '/')}`
+        const url = buildModuleUrl(getEnvConfig().BASE_URL, relFromRoot)
+
+        const module: Record<string, unknown> = {
+            id,
+            name: displayName,
+            type,
+            artifact: { size, url, MD5: md5 }
+        }
+        // required マッピング（Nebula の ToggleableModule と同一）
+        if (namespace === 'optionalon') module.required = { value: false }
+        else if (namespace === 'optionaloff') module.required = { value: false, def: false }
+        // required 名前空間は required フィールド省略（＝必須）
+
+        const linkPath = `${jarPath}.link.json`
+        writeFileSync(linkPath, JSON.stringify(module, null, 2), 'utf-8')
+
+        // jar は削除せず ROOT に残す。生成時に jar 側で id 上書きが適用され、
+        // jar はリポジトリ上に残るため URL が壊れない（二重取り込みは discovery 側で防止済み）。
+        res.json({ ok: true, module, linkFile: basename(linkPath) })
+    } catch (e) { res.status(500).json({ error: String(e) }) }
+})
+
 // --- プロファイル API ---
 app.get('/api/profiles', (_req, res) => {
     const store = loadProfileStore()
@@ -667,10 +756,20 @@ app.post('/api/git/commit-push', async (req, res) => {
     catch (e) { res.status(500).json({ error: String(e) }) }
 })
 
+// distribution.json を削除してコミット＆プッシュ（再生成で反映されない問題への対処）
+app.post('/api/git/remove-distribution', async (_req, res) => {
+    const { repoPath, branch } = getGitConfig()
+    if (!repoPath || !existsSync(repoPath)) { res.status(400).json({ error: 'リポジトリパスが未設定または存在しません' }); return }
+    try { res.json({ ok: true, message: await removeDistributionAndCommit(repoPath, branch) }) }
+    catch (e) { res.status(500).json({ error: String(e) }) }
+})
+
 const PORT = process.env.PORT ?? 3000
 
 // 直接実行の場合はサーバーを起動、インポートされた場合はアプリをエクスポート
-if (import.meta.url === `file://${process.argv[1]}`) {
+// pathToFileURL で比較すると Windows のパス（バックスラッシュ）でも正しく判定できる
+const isDirectRun = process.argv[1] != null && import.meta.url === pathToFileURL(process.argv[1]).href
+if (isDirectRun) {
     app.listen(PORT, () => {
         console.log(`\n🌟 Nebula簡単操作 が起動しました: http://localhost:${PORT}\n`)
     })

@@ -598,6 +598,13 @@
   }
   .file-item:hover { background: #1e2040; }
   .file-item.dragging { opacity: 0.4; cursor: grabbing; }
+  /* リンク（.link.json）ファイルの区別表示 */
+  .file-item-link { background: rgba(126,200,227,0.06); border-left: 3px solid #7ec8e3; }
+  .file-item-link .file-item-name { color: #7ec8e3; }
+  .link-badge {
+    flex-shrink: 0; font-size: 0.66rem; font-weight: bold; color: #0b2a35;
+    background: #7ec8e3; border-radius: 4px; padding: 1px 6px; white-space: nowrap;
+  }
   .file-sub-section.drag-target { outline: 2px dashed var(--accent); outline-offset: 2px; background: rgba(233,69,96,0.05); border-radius: var(--radius); }
   .file-item-name {
     flex: 1;
@@ -1054,6 +1061,15 @@
             <label class="form-label">コミットメッセージ</label>
             <input id="git-push-msg" class="form-input" type="text" placeholder="Update distribution">
             <button class="btn" id="btn-git-push" style="margin-top:8px;background:#1a5c2e;border-color:#2d8a4e;" onclick="gitCommitPush()">🚀 コミット ＆ プッシュ</button>
+          </div>
+
+          <!-- distribution.json のクリーン再反映 -->
+          <div class="card" style="margin-bottom:12px;">
+            <div class="card-title">distribution.json が反映されない時</div>
+            <div class="note" style="margin-bottom:8px;">
+              再生成しても内容が同じだと Git が差分なしと判断し、クライアントに反映されないことがあります。その場合はこのボタンで一度 <code>distribution.json</code> を削除してコミットし、その後「Distribution 生成」→「ROOT → リポジトリへコピー」→「コミット ＆ プッシュ」で入れ直してください。
+            </div>
+            <button class="btn" id="btn-git-rmdistro" style="background:#7a2d2d;border-color:#a94442;" onclick="gitRemoveDistribution()">🗑 distribution.json を削除してコミット</button>
           </div>
 
           <!-- Git ステータス -->
@@ -1906,7 +1922,7 @@ async function refreshGitLog() {
 }
 
 // プログレスバー制御
-const GIT_BTNS = ['btn-git-sync', 'btn-git-sync-from', 'btn-git-fetch', 'btn-git-pull', 'btn-git-push']
+const GIT_BTNS = ['btn-git-sync', 'btn-git-sync-from', 'btn-git-fetch', 'btn-git-pull', 'btn-git-push', 'btn-git-rmdistro']
 
 function gitProgressStart(label) {
   document.getElementById('git-progress-wrap').style.display = 'block'
@@ -2024,6 +2040,17 @@ async function gitSync() {
   } else { gitError('コピー失敗', data.error) }
 }
 
+async function gitRemoveDistribution() {
+  if (!confirm('リポジトリの distribution.json を削除してコミット＆プッシュします。\n（この後「Distribution 生成」→「ROOT → リポジトリへコピー」→「コミット ＆ プッシュ」で入れ直してください）\nよろしいですか？')) return
+  gitProgressStart('🗑 distribution.json を削除してコミット中...')
+  const r = await fetch('/api/git/remove-distribution', { method: 'POST' })
+  const data = await r.json()
+  if (r.ok) {
+    gitProgressDone('✓ ' + data.message)
+    await refreshGitStatus()
+  } else { gitError('削除コミット失敗', data.error) }
+}
+
 async function gitSyncFrom() {
   if (!confirm('リポジトリの内容を ROOT フォルダへコピーします。\nROOT 内の同名ファイル（modpacks/ repo/ servers/ meta/ distribution.json）は上書きされます。よろしいですか？')) return
   gitProgressStart('📥 リポジトリから ROOT へコピー中...')
@@ -2125,7 +2152,7 @@ function renderFileCategory(cat, info) {
       emptyEl.className = 'file-empty'
       emptyEl.textContent = 'ファイルなし'
       if (files.length === 0) sec.appendChild(emptyEl)
-      else for (const f of files) sec.appendChild(makeFileItem(cat, f, sub, true))
+      else renderFileList(sec, cat, files, sub, true)
 
       // このセクションをドロップターゲットにする
       sec.addEventListener('dragover', (e) => {
@@ -2196,7 +2223,7 @@ function makeFlatSection(cat, dir, files) {
     empty.textContent = 'ファイルなし'
     sec.appendChild(empty)
   } else {
-    for (const f of files) sec.appendChild(makeFileItem(cat, f, null, false))
+    renderFileList(sec, cat, files, null, false)
   }
 
   // このセクションをドラッグターゲット（フォルダ間移動）
@@ -2232,7 +2259,18 @@ function makeFlatSection(cat, dir, files) {
   return sec
 }
 
-function makeFileItem(cat, file, currentSub, isToggleable) {
+// jar と .link.json をグルーピング表示（jar側にバッジを付け、対応する .link.json 行は隠す）
+function renderFileList(sec, cat, files, sub, isToggleable) {
+  const names = new Set(files.map(f => f.name))
+  for (const f of files) {
+    const lm = /^(.+)\.link\.json$/i.exec(f.name)
+    if (lm && names.has(lm[1])) continue // jarが存在する .link.json は非表示（jar側に表示）
+    const hasOverride = names.has(f.name + '.link.json')
+    sec.appendChild(makeFileItem(cat, f, sub, isToggleable, hasOverride))
+  }
+}
+
+function makeFileItem(cat, file, currentSub, isToggleable, hasOverride) {
   const div = document.createElement('div')
   div.className = 'file-item'
 
@@ -2249,11 +2287,80 @@ function makeFileItem(cat, file, currentSub, isToggleable) {
   })
   div.addEventListener('dragend', () => div.classList.remove('dragging'))
 
-  div.innerHTML = `
-    <span style="color:var(--text-muted);font-size:0.7rem;cursor:grab;flex-shrink:0">⠿</span>
-    <span class="file-item-name" title="${file.name}">📄 ${file.name}</span>
-    <span class="file-item-size">${fmtSize(file.size)}</span>
-  `
+  const isLinkOnly = /\.link\.json$/i.test(file.name) // jar が無い link 単体
+  const isMod = (cat === 'forgemods' || cat === 'fabricmods')
+  const isJar = /\.jar$/i.test(file.name)
+
+  if (isLinkOnly) {
+    // jar が無い link 単体（外部ホスト等）
+    div.classList.add('file-item-link')
+    const targetJar = file.name.replace(/\.link\.json$/i, '')
+    div.innerHTML = `
+      <span style="color:var(--text-muted);font-size:0.7rem;cursor:grab;flex-shrink:0">⠿</span>
+      <span class="link-badge">🔗 リンク(jarなし)</span>
+      <span class="file-item-name" title="${file.name}">${targetJar}</span>
+      <span class="file-item-size">${fmtSize(file.size)}</span>
+    `
+  } else if (hasOverride) {
+    // jar はそのまま。名前固定（.link.json）が付いている
+    div.classList.add('file-item-link')
+    div.innerHTML = `
+      <span style="color:var(--text-muted);font-size:0.7rem;cursor:grab;flex-shrink:0">⠿</span>
+      <span class="link-badge">🔗 名前固定</span>
+      <span class="file-item-name" title="${file.name}">📄 ${file.name}</span>
+      <span class="file-item-size">${fmtSize(file.size)}</span>
+    `
+  } else {
+    div.innerHTML = `
+      <span style="color:var(--text-muted);font-size:0.7rem;cursor:grab;flex-shrink:0">⠿</span>
+      <span class="file-item-name" title="${file.name}">📄 ${file.name}</span>
+      <span class="file-item-size">${fmtSize(file.size)}</span>
+    `
+  }
+
+  // 名前固定 / 解除 ボタン（forgemods/fabricmods の jar のみ）
+  if (isMod && isJar) {
+    const linkBtn = document.createElement('button')
+    linkBtn.className = 'file-action-btn'
+    linkBtn.style.color = '#7ec8e3'
+    if (hasOverride) {
+      linkBtn.textContent = '🔗 解除'
+      linkBtn.title = '名前固定（.link.json）を解除します'
+      linkBtn.onclick = async (e) => {
+        e.stopPropagation()
+        if (!confirm(`「${file.name}」の名前固定（.link.json）を解除しますか？\n（jarはそのまま残ります）`)) return
+        linkBtn.disabled = true
+        const r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/file`, {
+          method: 'DELETE', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ category: cat, relativePath: file.relativePath + '.link.json' })
+        })
+        if (r.ok) openDetail(currentDetail.name)
+        else { alert('解除に失敗しました:\n' + await readError(r)); linkBtn.disabled = false }
+      }
+    } else {
+      linkBtn.textContent = '🔗 名前固定'
+      linkBtn.title = 'クライアント配置名を元のファイル名に固定します（jarは削除されません。配置名ずれによる不具合対策）'
+      linkBtn.onclick = async (e) => {
+        e.stopPropagation()
+        if (!confirm(`「${file.name}」の配置名を元のファイル名に固定しますか？\n\n・${file.name}.link.json を作成し、クライアントでの配置名を「${file.name}」に固定します\n・jarはそのまま残ります（削除されません）ので、リポジトリ運用に影響しません`)) return
+        linkBtn.disabled = true
+        const r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/link-file`, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ category: cat, relativePath: file.relativePath })
+        })
+        if (r.ok) {
+          const data = await r.json()
+          alert(`✓ 配置名を「${file.name}」に固定しました。\nモジュールID: ${data.module.id}\n\nこの後「Distribution 生成」で反映されます。`)
+          openDetail(currentDetail.name)
+        } else {
+          alert('失敗しました:\n' + await readError(r))
+          linkBtn.disabled = false
+        }
+      }
+    }
+    div.appendChild(linkBtn)
+  }
 
   // 削除ボタン
   const delBtn = document.createElement('button')
