@@ -155,7 +155,9 @@ export async function syncToRepo(rootPath: string, repoPath: string): Promise<st
     return copied
 }
 
-// リポジトリ → ROOT へコピー（syncToRepo の逆方向。プル後に作業フォルダへ反映する用途）
+// リポジトリ → ROOT へ「置き換え（ミラー）」コピー（syncToRepo の逆方向）。
+// 各対象フォルダはコピー前に ROOT 側を削除してから複製するため、
+// リポジトリで移動・削除したファイルが ROOT 側にも正しく反映される（servers 等を丸ごと置き換え）。
 export async function syncFromRepo(rootPath: string, repoPath: string): Promise<string[]> {
     const copied: string[] = []
 
@@ -163,16 +165,19 @@ export async function syncFromRepo(rootPath: string, repoPath: string): Promise<
         const src = join(resolvePath(repoPath), dir)
         const dest = join(resolvePath(rootPath), dir)
         if (existsSync(src)) {
+            // 置き換え: 既存の対象フォルダを削除してから丸ごとコピー
+            if (existsSync(dest)) rmSync(dest, { recursive: true, force: true })
             cpSync(src, dest, { recursive: true, force: true })
             copied.push(dir)
         }
+        // リポジトリ側に対象が無い場合は ROOT 側を消さない（ローカル専用フォルダの誤削除防止）
     }
 
     for (const file of SYNC_FILES) {
         const src = join(resolvePath(repoPath), file)
         const dest = join(resolvePath(rootPath), file)
         if (existsSync(src)) {
-            cpSync(src, dest)
+            cpSync(src, dest, { force: true })
             copied.push(file)
         }
     }

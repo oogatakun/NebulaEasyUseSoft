@@ -1050,7 +1050,7 @@
           <!-- 操作ボタン -->
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
             <button class="btn" id="btn-git-sync" onclick="gitSync()">📂 ROOT → リポジトリへ置き換え</button>
-            <button class="btn" id="btn-git-sync-from" onclick="gitSyncFrom()">📥 リポジトリ → ROOTへコピー</button>
+            <button class="btn" id="btn-git-sync-from" onclick="gitSyncFrom()">📥 リポジトリ → ROOTへ置き換え</button>
             <button class="btn" id="btn-git-fetch" onclick="gitFetch()">⬇ フェッチ</button>
             <button class="btn" id="btn-git-pull" onclick="gitPull()">⬇ プル</button>
           </div>
@@ -2053,12 +2053,12 @@ async function gitRemoveDistribution() {
 }
 
 async function gitSyncFrom() {
-  if (!confirm('リポジトリの内容を ROOT フォルダへコピーします。\nROOT 内の同名ファイル（modpacks/ repo/ servers/ meta/ distribution.json）は上書きされます。よろしいですか？')) return
-  gitProgressStart('📥 リポジトリから ROOT へコピー中...')
+  if (!confirm('リポジトリの内容で ROOT を「置き換え」ます。\n\n・対象フォルダ（modpacks / repo / servers / meta）と distribution.json を、リポジトリと完全一致させます\n・リポジトリ側に無いファイル（ROOT で移動・削除したものなど）は ROOT からも削除されます\n\nよろしいですか？')) return
+  gitProgressStart('📥 リポジトリで ROOT を置き換え中...')
   const r = await fetch('/api/git/sync-from', { method: 'POST' })
   const data = await r.json()
   if (r.ok) {
-    gitProgressDone(data.copied.length ? `✓ コピー完了: ${data.copied.join(', ')}` : '✓ コピー対象がありませんでした')
+    gitProgressDone(data.copied.length ? `✓ 置き換え完了: ${data.copied.join(', ')}` : '✓ 対象がありませんでした')
     await refreshGitStatus()
   } else { gitError('コピー失敗', data.error) }
 }
