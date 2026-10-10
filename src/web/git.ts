@@ -1,5 +1,5 @@
 import { simpleGit, SimpleGit, StatusResult } from 'simple-git'
-import { existsSync, cpSync, unlinkSync, rmSync } from 'fs'
+import { existsSync, cpSync, unlinkSync, rmSync, readdirSync, statSync } from 'fs'
 import { resolve as resolvePath, join } from 'path'
 import { spawn } from 'child_process'
 
@@ -49,6 +49,13 @@ async function fetchGithubCredential(): Promise<{ hasCredential: boolean; userna
     return { hasCredential: !!password, username, password }
 }
 
+// GitHub のアクセストークン（git credential 経由）を取得する。
+// Release API など GitHub REST API 呼び出しで再利用する。
+export async function getGithubToken(): Promise<string | null> {
+    const cred = await fetchGithubCredential()
+    return cred.hasCredential ? cred.password : null
+}
+
 // 取得したトークンが実際に有効か GitHub API で検証し、ログイン名を得る
 async function validateGithubToken(password: string | null): Promise<{ valid: boolean | null; login: string | null }> {
     if (!password) return { valid: false, login: null }
@@ -93,6 +100,33 @@ export async function checkGitLink(): Promise<GitLinkStatus> {
 const SYNC_TARGETS = ['modpacks', 'repo', 'servers', 'meta']
 const SYNC_FILES = ['distribution.json']
 
+// ロックに強い削除（Windows で ENOTEMPTY/EBUSY が出た時にリトライする）
+function safeRemove(target: string): void {
+    rmSync(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+}
+
+// dest 内で src に存在しないファイル/フォルダだけを削除する（フォルダ丸ごと削除は避ける）
+function removeExtras(srcDir: string, destDir: string): void {
+    if (!existsSync(destDir)) return
+    for (const entry of readdirSync(destDir)) {
+        const s = join(srcDir, entry)
+        const d = join(destDir, entry)
+        if (!existsSync(s)) {
+            safeRemove(d)                       // src に無い → 余分なので削除
+        } else if (statSync(d).isDirectory() && statSync(s).isDirectory()) {
+            removeExtras(s, d)                  // 両方フォルダ → 再帰的に差分削除
+        }
+    }
+}
+
+// src の内容で dest を「置き換え（ミラー）」する。
+// フォルダを丸ごと削除せず、コピー＋余分ファイルの削除で行うため、
+// ロック中ファイルや大量ファイルでも失敗しにくく、git にも優しい。
+function mirrorDir(src: string, dest: string): void {
+    cpSync(src, dest, { recursive: true, force: true })  // 追加・更新
+    removeExtras(src, dest)                               // 余分を削除
+}
+
 export interface GitStatus {
     branch: string
     tracking: string | null
@@ -129,13 +163,10 @@ export async function syncToRepo(rootPath: string, repoPath: string): Promise<st
         const src = join(resolvePath(rootPath), dir)
         const dest = join(resolvePath(repoPath), dir)
         if (existsSync(src)) {
-            // 置き換え: 既存の対象フォルダを削除してから丸ごとコピー（余分なファイルを除去）
-            if (existsSync(dest)) rmSync(dest, { recursive: true, force: true })
-            cpSync(src, dest, { recursive: true, force: true })
+            mirrorDir(src, dest)               // 置き換え（コピー＋余分削除、丸ごと削除しない）
             copied.push(dir)
         } else if (existsSync(dest)) {
-            // ROOT 側に対象が無い場合はリポジトリ側からも除去（完全ミラー）
-            rmSync(dest, { recursive: true, force: true })
+            safeRemove(dest)                   // ROOT 側に対象が無い場合はリポジトリ側からも除去
             copied.push(`${dir} (削除)`)
         }
     }
@@ -147,7 +178,7 @@ export async function syncToRepo(rootPath: string, repoPath: string): Promise<st
             cpSync(src, dest, { force: true })
             copied.push(file)
         } else if (existsSync(dest)) {
-            rmSync(dest, { force: true })
+            safeRemove(dest)
             copied.push(`${file} (削除)`)
         }
     }
@@ -165,9 +196,7 @@ export async function syncFromRepo(rootPath: string, repoPath: string): Promise<
         const src = join(resolvePath(repoPath), dir)
         const dest = join(resolvePath(rootPath), dir)
         if (existsSync(src)) {
-            // 置き換え: 既存の対象フォルダを削除してから丸ごとコピー
-            if (existsSync(dest)) rmSync(dest, { recursive: true, force: true })
-            cpSync(src, dest, { recursive: true, force: true })
+            mirrorDir(src, dest)               // 置き換え（コピー＋余分削除、丸ごと削除しない）
             copied.push(dir)
         }
         // リポジトリ側に対象が無い場合は ROOT 側を消さない（ローカル専用フォルダの誤削除防止）

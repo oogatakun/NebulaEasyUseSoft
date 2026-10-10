@@ -10,6 +10,7 @@ import multer from 'multer'
 import dotenv from 'dotenv'
 import { sseManager } from './SseLogTransport.js'
 import { getGitStatus, syncToRepo, syncFromRepo, gitFetch, gitPull, gitCommitPush, getLog, checkGitLink, removeDistributionAndCommit } from './git.js'
+import { externalizeFile, unexternalizeFile, scanAndExternalize } from './externalize.js'
 import {
     cmdInitRoot,
     cmdGenerateServer,
@@ -57,6 +58,9 @@ interface Profile {
     GIT_REPO_PATH?: string
     GIT_BRANCH?: string
     GIT_COMMIT_MSG?: string
+    ASSET_REPO?: string
+    ASSET_RELEASE_TAG?: string
+    ASSET_SIZE_THRESHOLD?: string
 }
 
 interface ProfileStore {
@@ -107,6 +111,9 @@ function applyProfile(profile: Profile): void {
     process.env.GIT_REPO_PATH = profile.GIT_REPO_PATH ?? ''
     process.env.GIT_BRANCH = profile.GIT_BRANCH ?? 'main'
     process.env.GIT_COMMIT_MSG = profile.GIT_COMMIT_MSG ?? 'Update distribution'
+    process.env.ASSET_REPO = profile.ASSET_REPO ?? ''
+    process.env.ASSET_RELEASE_TAG = profile.ASSET_RELEASE_TAG ?? 'mods'
+    process.env.ASSET_SIZE_THRESHOLD = profile.ASSET_SIZE_THRESHOLD ?? '103809024'
 }
 
 // 起動時にアクティブプロファイルを適用（プロファイルがない場合はスキップ）
@@ -142,6 +149,13 @@ interface FileEntry {
     relativePath: string  // カテゴリルートからの相対パス
     size: number
     dir: string           // 親ディレクトリ（ルートなら ""）
+    externalUrl?: string  // 外部化 .link.json の配信URL（あれば）
+}
+
+// <jar>.link.json の artifact.url を読む（外部化mod判定・表示用）
+function readExternalUrl(filePath: string): string | undefined {
+    if (!filePath.endsWith('.jar.link.json')) return undefined
+    try { return (JSON.parse(readFileSync(filePath, 'utf-8')) as { artifact?: { url?: string } }).artifact?.url } catch { return undefined }
 }
 
 interface CategoryFiles {
@@ -164,7 +178,7 @@ function collectFiles(dirPath: string, basePath: string): FileEntry[] {
             result.push(...collectFiles(fullPath, basePath))
         } else {
             const dirPart = relPath.includes('/') ? relPath.slice(0, relPath.lastIndexOf('/')) : ''
-            result.push({ name: entry, relativePath: relPath, size: s.size, dir: dirPart })
+            result.push({ name: entry, relativePath: relPath, size: s.size, dir: dirPart, externalUrl: readExternalUrl(fullPath) })
         }
     }
     return result
@@ -191,7 +205,8 @@ function listCategory(categoryPath: string): CategoryFiles {
                             name: file,
                             relativePath: `${sub}/${file}`,
                             size: statSync(fp).size,
-                            dir: sub
+                            dir: sub,
+                            externalUrl: readExternalUrl(fp)
                         })
                     }
                 }
@@ -269,6 +284,16 @@ app.post('/api/generate-server-curseforge', async (req, res) => {
 
 app.post('/api/generate-distro', async (req, res) => {
     const { name, installLocal, discardOutput, invalidateCache } = req.body as Record<string, unknown>
+    const env = getEnvConfig()
+    const asset = getAssetConfig()
+    // 生成前に、閾値超ファイルを自動で外部リリース化する（100MB超はコミットできないため）
+    try {
+        const externalized = await scanAndExternalize(resolvePath(env.ROOT), asset.repo, asset.tag, asset.threshold)
+        if (externalized.length) sseManager.broadcast({ type: 'log', level: 'info', message: `外部リリース化: ${externalized.join(', ')}` })
+    } catch (e) {
+        sseManager.broadcast({ type: 'done', success: false, error: `大容量ファイルの外部化に失敗: ${String(e)}` })
+        res.status(500).json({ error: `大容量ファイルの外部化に失敗しました: ${String(e)}` }); return
+    }
     await runCommand(res, () => cmdGenerateDistro(getEnvConfig(), (name as string) || 'distribution', Boolean(installLocal), Boolean(discardOutput), Boolean(invalidateCache)))
 })
 
@@ -316,11 +341,15 @@ app.get('/api/servers', async (_req, res) => {
             }
             const countJars = (dirPath: string): number => {
                 try {
+                    const names = readdirSync(dirPath)
+                    const set = new Set(names)
                     let count = 0
-                    for (const item of readdirSync(dirPath)) {
+                    for (const item of names) {
                         const p = join(dirPath, item)
-                        if (statSync(p).isDirectory()) count += countJars(p)
-                        else if (item.endsWith('.jar')) count++
+                        if (statSync(p).isDirectory()) { count += countJars(p); continue }
+                        if (item.endsWith('.jar')) count++
+                        // 外部化/リンク: 同居 jar が無い場合のみ 1 mod として数える
+                        else if (item.endsWith('.jar.link.json') && !set.has(item.slice(0, -('.link.json'.length)))) count++
                     }
                     return count
                 } catch { return 0 }
@@ -538,6 +567,27 @@ app.post('/api/servers/:name/link-file', async (req, res) => {
     } catch (e) { res.status(500).json({ error: String(e) }) }
 })
 
+// --- 大容量ファイルを外部リリース化 ---
+app.post('/api/servers/:name/externalize', async (req, res) => {
+    const serverDir = getServerDir(req.params.name)
+    const { category, relativePath } = req.body as { category: string; relativePath: string }
+    if (!existsSync(serverDir)) { res.status(404).json({ error: 'Server not found' }); return }
+    const asset = getAssetConfig()
+    try {
+        const result = await externalizeFile(serverDir, req.params.name, category, relativePath, asset.repo, asset.tag)
+        res.json({ ok: true, ...result })
+    } catch (e) { res.status(500).json({ error: String(e) }) }
+})
+
+// --- 外部リリース化の解除（jar を復元） ---
+app.post('/api/servers/:name/unexternalize', async (req, res) => {
+    const serverDir = getServerDir(req.params.name)
+    const { category, relativePath } = req.body as { category: string; relativePath: string }
+    if (!existsSync(serverDir)) { res.status(404).json({ error: 'Server not found' }); return }
+    try { res.json({ ok: true, ...(await unexternalizeFile(serverDir, category, relativePath)) }) }
+    catch (e) { res.status(500).json({ error: String(e) }) }
+})
+
 // --- プロファイル API ---
 app.get('/api/profiles', (_req, res) => {
     const store = loadProfileStore()
@@ -654,6 +704,33 @@ function getGitConfig() {
         commitMsg: process.env.GIT_COMMIT_MSG ?? 'Update distribution'
     }
 }
+
+// 大容量ファイル外部化の設定
+function getAssetConfig() {
+    const t = parseInt(process.env.ASSET_SIZE_THRESHOLD ?? '103809024', 10)
+    return {
+        repo: process.env.ASSET_REPO ?? '',
+        tag: process.env.ASSET_RELEASE_TAG || 'mods',
+        threshold: Number.isFinite(t) && t > 0 ? t : 103809024
+    }
+}
+app.get('/api/asset-config', (_req, res) => { res.json(getAssetConfig()) })
+app.post('/api/asset-config', (req, res) => {
+    try {
+        const { repo, tag, threshold } = req.body as { repo?: string; tag?: string; threshold?: number }
+        const store = loadProfileStore()
+        const cur = store.profiles[store.active] ?? { ROOT: '', BASE_URL: '' }
+        store.profiles[store.active] = {
+            ...cur,
+            ASSET_REPO: repo ?? '',
+            ASSET_RELEASE_TAG: tag || 'mods',
+            ASSET_SIZE_THRESHOLD: String(threshold ?? 103809024)
+        }
+        saveProfileStore(store)
+        applyProfile(store.profiles[store.active])
+        res.json({ ok: true })
+    } catch (e) { res.status(500).json({ error: String(e) }) }
+})
 
 function saveGitConfig(cfg: { repoPath: string; branch: string; commitMsg: string }) {
     const store = loadProfileStore()

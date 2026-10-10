@@ -1029,6 +1029,21 @@
             </div>
             <button class="btn" style="margin-top:8px" onclick="saveGitConfig()">💾 設定を保存</button>
             <span id="git-config-saved" style="display:none;color:var(--success);font-size:0.82rem;margin-left:10px;">✓ 保存しました</span>
+
+            <div style="margin-top:14px;border-top:1px solid #333;padding-top:12px;">
+              <div class="card-title" style="font-size:0.9rem">大容量ファイル（100MB超）の外部リリース配信</div>
+              <div class="note" style="margin:6px 0;">100MB超のMODは GitHub にコミットできません。別リポジトリの Releases にアップロードして配信します。</div>
+              <label class="form-label">アセット用リポジトリ（owner/repo）</label>
+              <input id="asset-repo" class="form-input" type="text" placeholder="例: owner/repo">
+              <div style="display:flex;gap:12px;margin-top:8px;">
+                <div style="flex:1"><label class="form-label">Releaseタグ</label>
+                  <input id="asset-tag" class="form-input" type="text" placeholder="mods"></div>
+                <div style="flex:1"><label class="form-label">自動外部化の閾値(MB)</label>
+                  <input id="asset-threshold-mb" class="form-input" type="number" placeholder="99"></div>
+              </div>
+              <button class="btn" style="margin-top:8px" onclick="saveAssetConfig()">💾 大容量設定を保存</button>
+              <span id="asset-config-saved" style="display:none;color:var(--success);font-size:0.82rem;margin-left:10px;">✓ 保存しました</span>
+            </div>
           </div>
 
           <!-- 同期ターゲット説明 -->
@@ -1417,6 +1432,7 @@ async function loadConfig() {
     const cfg = await cr.json()
     currentConfig = cfg
     applyConfigToUI(cfg)
+    loadAssetConfig()
   } catch (e) {
     // 読み込み失敗でUIが壊れないようにする（クリックで再取得＝自己修復）
     console.error('loadConfig failed', e)
@@ -1876,6 +1892,24 @@ async function saveGitConfig() {
   }
 }
 
+async function loadAssetConfig() {
+  try {
+    const c = await fetch('/api/asset-config').then(r => r.json())
+    document.getElementById('asset-repo').value = c.repo ?? ''
+    document.getElementById('asset-tag').value = c.tag ?? 'mods'
+    document.getElementById('asset-threshold-mb').value = Math.round((c.threshold ?? 103809024) / (1024*1024))
+  } catch {}
+}
+async function saveAssetConfig() {
+  const repo = document.getElementById('asset-repo').value.trim()
+  const tag = document.getElementById('asset-tag').value.trim() || 'mods'
+  const mb = parseInt(document.getElementById('asset-threshold-mb').value, 10)
+  const threshold = (Number.isFinite(mb) && mb > 0 ? mb : 99) * 1024 * 1024
+  const r = await fetch('/api/asset-config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ repo, tag, threshold }) })
+  if (!r.ok) { alert('保存に失敗しました:\n' + await readError(r)); return }
+  const el = document.getElementById('asset-config-saved'); el.style.display = 'inline'; setTimeout(() => el.style.display = 'none', 2500)
+}
+
 async function refreshGitStatus() {
   const area = document.getElementById('git-status-area')
   area.textContent = '読み込み中...'
@@ -2292,13 +2326,14 @@ function makeFileItem(cat, file, currentSub, isToggleable, hasOverride) {
   const isMod = (cat === 'forgemods' || cat === 'fabricmods')
   const isJar = /\.jar$/i.test(file.name)
 
+  const isExternalRelease = isLinkOnly && /releases\/download\//.test(file.externalUrl || '')
   if (isLinkOnly) {
-    // jar が無い link 単体（外部ホスト等）
+    // jar が無い link 単体（外部ホスト/外部リリース）
     div.classList.add('file-item-link')
     const targetJar = file.name.replace(/\.link\.json$/i, '')
     div.innerHTML = `
       <span style="color:var(--text-muted);font-size:0.7rem;cursor:grab;flex-shrink:0">⠿</span>
-      <span class="link-badge">🔗 リンク(jarなし)</span>
+      <span class="link-badge" style="${isExternalRelease ? 'background:#58a6ff' : ''}">${isExternalRelease ? '☁ 外部リリース' : '🔗 外部リンク'}</span>
       <span class="file-item-name" title="${file.name}">${targetJar}</span>
       <span class="file-item-size">${fmtSize(file.size)}</span>
     `
@@ -2361,6 +2396,50 @@ function makeFileItem(cat, file, currentSub, isToggleable, hasOverride) {
       }
     }
     div.appendChild(linkBtn)
+  }
+
+  // ☁ 外部リリース化（forgemods/fabricmods/files の素のjarのみ）
+  if ((cat === 'forgemods' || cat === 'fabricmods' || cat === 'files') && isJar && !isLinkOnly && !hasOverride) {
+    const extBtn = document.createElement('button')
+    extBtn.className = 'file-action-btn'
+    extBtn.style.color = '#58a6ff'
+    extBtn.textContent = '☁ 外部リリース化'
+    extBtn.title = '100MB超などを GitHub Releases にアップロードして配信（jarはROOTから除去されます）'
+    extBtn.onclick = async (e) => {
+      e.stopPropagation()
+      if (!confirm(`「${file.name}」を GitHub Releases にアップロードして外部配信にしますか？\n\n・アセットリポジトリの Release にアップロードします\n・${file.name}.link.json を作成し、元のjarはROOTから除去します（Releaseに存在するため安全）`)) return
+      extBtn.disabled = true
+      extBtn.textContent = 'アップロード中...'
+      const r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/externalize`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ category: cat, relativePath: file.relativePath })
+      })
+      if (r.ok) { const d = await r.json(); alert(`✓ 外部リリース化しました。\nURL: ${d.url}`); openDetail(currentDetail.name) }
+      else { alert('外部リリース化に失敗しました:\n' + await readError(r)); extBtn.disabled = false; extBtn.textContent = '☁ 外部リリース化' }
+    }
+    div.appendChild(extBtn)
+  }
+
+  // ☁ 解除（外部化された .link.json 単体）
+  if (isExternalRelease) {
+    const unBtn = document.createElement('button')
+    unBtn.className = 'file-action-btn'
+    unBtn.style.color = '#58a6ff'
+    unBtn.textContent = '☁ 解除'
+    unBtn.title = 'Releaseからjarを復元し、外部配信を解除します'
+    unBtn.onclick = async (e) => {
+      e.stopPropagation()
+      const jarName = file.name.replace(/\.link\.json$/i, '')
+      const jarRel = file.relativePath.replace(/\.link\.json$/i, '')
+      if (!confirm(`「${jarName}」の外部配信を解除し、jarを復元しますか？`)) return
+      unBtn.disabled = true; unBtn.textContent = '復元中...'
+      const r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/unexternalize`, {
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ category: cat, relativePath: jarRel })
+      })
+      if (r.ok) openDetail(currentDetail.name)
+      else { alert('解除に失敗しました:\n' + await readError(r)); unBtn.disabled = false; unBtn.textContent = '☁ 解除' }
+    }
+    div.appendChild(unBtn)
   }
 
   // 削除ボタン
