@@ -606,6 +606,7 @@
     background: #7ec8e3; border-radius: 4px; padding: 1px 6px; white-space: nowrap;
   }
   .file-sub-section.drag-target { outline: 2px dashed var(--accent); outline-offset: 2px; background: rgba(233,69,96,0.05); border-radius: var(--radius); }
+  .detail-tab.drag-target { background: rgba(233,69,96,0.25); border-radius: 6px 6px 0 0; }
   .file-item-name {
     flex: 1;
     overflow: hidden;
@@ -707,14 +708,15 @@
           <button class="back-btn" onclick="closeDetail()">← 戻る</button>
           <span class="detail-server-name" id="detail-server-name"></span>
           <span class="detail-loader-tag tag" id="detail-loader-tag"></span>
+          <button class="back-btn" onclick="refreshDetail()" title="再読み込み（外部で追加したファイル/フォルダを反映）">🔄 更新</button>
           <button class="back-btn" onclick="openExplorer()" title="エクスプローラーで開く">📂 開く</button>
         </div>
         <div class="detail-tabs">
           <button class="detail-tab active" onclick="switchDetailTab('settings',this)">⚙ 設定</button>
-          <button class="detail-tab" onclick="switchDetailTab('forgemods',this)">🔨 ForgeMods</button>
-          <button class="detail-tab" onclick="switchDetailTab('fabricmods',this)">🧵 FabricMods</button>
-          <button class="detail-tab" onclick="switchDetailTab('files',this)">📄 Files</button>
-          <button class="detail-tab" onclick="switchDetailTab('libraries',this)">📚 Libraries</button>
+          <button class="detail-tab" data-tab="forgemods" onclick="switchDetailTab('forgemods',this)">🔨 ForgeMods</button>
+          <button class="detail-tab" data-tab="fabricmods" onclick="switchDetailTab('fabricmods',this)">🧵 FabricMods</button>
+          <button class="detail-tab" data-tab="files" onclick="switchDetailTab('files',this)">📄 Files</button>
+          <button class="detail-tab" data-tab="libraries" onclick="switchDetailTab('libraries',this)">📚 Libraries</button>
         </div>
         <div class="detail-body">
 
@@ -765,6 +767,7 @@
           </div>
           <!-- Files タブ -->
           <div class="detail-tab-content" id="dtab-files">
+            <div style="margin-bottom:8px;"><button class="btn btn-secondary" style="margin:0" onclick="createFolderPrompt('files')">📁 フォルダ作成</button></div>
             <div id="files-files"></div>
           </div>
           <!-- Libraries タブ -->
@@ -1060,6 +1063,13 @@
             <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
               <div id="git-progress-bar" style="height:100%;width:0%;background:var(--accent);border-radius:3px;transition:width 0.3s ease;"></div>
             </div>
+          </div>
+
+          <!-- ワンクリック配信 -->
+          <div class="card" style="margin-bottom:12px;background:rgba(46,138,78,0.08);border:1px solid #2d8a4e;">
+            <div class="card-title">🚀 ワンクリック配信（完全リフレッシュ）</div>
+            <div class="note" style="margin:6px 0;">生成 → リポジトリへ置き換え → コミット → distribution削除コミット → ROOTへ置き換え → 生成 → 置き換え → コミット を自動で順に実行します（distribution.jsonの反映確実化）。</div>
+            <button class="btn" id="btn-git-full" style="background:#1a5c2e;border-color:#2d8a4e" onclick="gitFullRepublish()">🚀 ワンクリック配信を実行</button>
           </div>
 
           <!-- 操作ボタン -->
@@ -2075,6 +2085,17 @@ async function gitSync() {
   } else { gitError('置き換え失敗', data.error) }
 }
 
+async function gitFullRepublish() {
+  if (!confirm('ワンクリック配信を実行します。\n\n生成 → ROOT→リポジトリ置き換え → コミット＆プッシュ → distribution削除コミット → リポジトリ→ROOT置き換え → 生成 → 置き換え → コミット＆プッシュ\n\nを自動で順に実行します（数分かかる場合があります）。よろしいですか？')) return
+  const btn = document.getElementById('btn-git-full')
+  if (btn) { btn.disabled = true }
+  const r = await fetch('/api/git/full-republish', { method: 'POST' })
+  // 進捗は実行ログ（SSE）に表示されます
+  if (!r.ok) { const d = await r.json().catch(()=>({})); alert('ワンクリック配信に失敗しました:\n' + (d.error || ('HTTP ' + r.status))) }
+  else { alert('✓ ワンクリック配信が完了しました。') }
+  if (btn) { btn.disabled = false }
+}
+
 async function gitRemoveDistribution() {
   if (!confirm('リポジトリの distribution.json を削除してコミット＆プッシュします。\n（この後「Distribution 生成」→「ROOT → リポジトリへコピー」→「コミット ＆ プッシュ」で入れ直してください）\nよろしいですか？')) return
   gitProgressStart('🗑 distribution.json を削除してコミット中...')
@@ -2135,7 +2156,47 @@ function switchDetailTab(name, btn) {
   document.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'))
   document.querySelectorAll('.detail-tab-content').forEach(t => t.classList.remove('active'))
   if (btn) btn.classList.add('active')
+  else document.querySelector(`.detail-tab[data-tab="${name}"]`)?.classList.add('active')
   document.getElementById('dtab-' + name)?.classList.add('active')
+}
+
+// 詳細を再読み込みして現在のタブを保ったまま再描画（外部変更の反映・移動後更新）
+async function refreshDetail() {
+  if (!currentDetail) return
+  try {
+    const data = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/detail`).then(r => r.json())
+    currentDetail.data = data
+    for (const cat of ['forgemods','fabricmods','files','libraries']) renderFileCategory(cat, data.files[cat])
+  } catch (e) { /* ignore */ }
+}
+
+// フォルダ作成
+async function createFolderPrompt(cat) {
+  if (!currentDetail) return
+  const name = prompt('作成するフォルダ名（例: shaderpacks、config/sub など）')
+  if (!name) return
+  const r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/mkdir`, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ category: cat, folderPath: name })
+  })
+  if (r.ok) await refreshDetail()
+  else alert('フォルダ作成に失敗しました:\n' + await readError(r))
+}
+
+// ドラッグ中にタブへカーソルを乗せると、そのタブへ自動で切り替える（中身を見てから落とせる）。
+// タブ自体はドロップ対象にしない（＝タブに落としても移動しない。移動は切替先のセクションへ落とす）。
+function setupTabDrops() {
+  document.querySelectorAll('.detail-tab[data-tab]').forEach(tab => {
+    const toCat = tab.getAttribute('data-tab')
+    const hoverSwitch = (e) => {
+      e.preventDefault()
+      if (!document.getElementById('dtab-' + toCat)?.classList.contains('active')) {
+        switchDetailTab(toCat)
+      }
+    }
+    tab.addEventListener('dragenter', hoverSwitch)
+    tab.addEventListener('dragover', hoverSwitch)
+    // drop はタブでは受けない（セクション側で移動を処理する）
+  })
 }
 
 // --- 設定保存 ---
@@ -2200,20 +2261,31 @@ function renderFileCategory(cat, info) {
       sec.addEventListener('drop', async (e) => {
         e.preventDefault()
         sec.classList.remove('drag-target')
+        // 外部ファイル（エクスプローラ等）→ このセクションにアップロード
+        if (e.dataTransfer.files && e.dataTransfer.files.length) {
+          await uploadFiles(cat, sub, e.dataTransfer.files, sec.querySelector('.drop-zone'))
+          return
+        }
         const fromSub = e.dataTransfer.getData('fromSub')
         const fromRelative = e.dataTransfer.getData('fromRelative')
         const fromCat = e.dataTransfer.getData('cat')
-        if (fromCat !== cat || fromSub === sub || !fromRelative) return
-
-        const r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/move`, {
-          method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ category: cat, fromRelative, toSub: sub })
-        })
-        if (r.ok) {
-          const data = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/detail`).then(r => r.json())
-          currentDetail.data = data
-          renderFileCategory(cat, data.files[cat])
-        } else { alert('移動に失敗しました') }
+        if (!fromRelative) return
+        let r
+        if (fromCat === cat) {
+          if (fromSub === sub) return
+          r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/move`, {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ category: cat, fromRelative, toSub: sub })
+          })
+        } else {
+          // カテゴリ跨ぎ移動（このセクションの区分へ）
+          const fileName = fromRelative.split('/').pop()
+          r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/move-category`, {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ fromCategory: fromCat, fromRelative, toCategory: cat, toRelative: `${sub}/${fileName}` })
+          })
+        }
+        if (r.ok) { await refreshDetail() } else { alert('移動に失敗しました:\n' + await readError(r)) }
       })
 
       sec.appendChild(makeDropZone(cat, sub))
@@ -2221,6 +2293,7 @@ function renderFileCategory(cat, info) {
     }
   } else {
     const files = info.flat ?? []
+    const folders = info.folders ?? []   // 空フォルダ含む全サブフォルダ
     // dir ごとにグループ化（'' = ルート直下）
     const groups = {}
     for (const f of files) {
@@ -2230,13 +2303,12 @@ function renderFileCategory(cat, info) {
     }
 
     // ルート直下のファイル＋ドロップゾーン
-    const rootSec = makeFlatSection(cat, '', groups[''] ?? [])
-    container.appendChild(rootSec)
+    container.appendChild(makeFlatSection(cat, '', groups[''] ?? []))
 
-    // サブフォルダごとのセクション
-    for (const [dir, groupFiles] of Object.entries(groups)) {
-      if (!dir) continue
-      container.appendChild(makeFlatSection(cat, dir, groupFiles))
+    // サブフォルダごとのセクション（空フォルダも含めて表示）
+    const allDirs = new Set([...folders, ...Object.keys(groups).filter(d => d)])
+    for (const dir of [...allDirs].sort()) {
+      container.appendChild(makeFlatSection(cat, dir, groups[dir] ?? []))
     }
   }
 }
@@ -2272,22 +2344,32 @@ function makeFlatSection(cat, dir, files) {
   sec.addEventListener('drop', async (e) => {
     e.preventDefault()
     sec.classList.remove('drag-target')
+    // 外部ファイル（エクスプローラ等）→ このフォルダにアップロード
+    if (e.dataTransfer.files && e.dataTransfer.files.length) {
+      await uploadFiles(cat, dir || null, e.dataTransfer.files, sec.querySelector('.drop-zone'))
+      return
+    }
     const fromCat = e.dataTransfer.getData('cat')
     const fromRelative = e.dataTransfer.getData('fromRelative')
     const fromDir = e.dataTransfer.getData('fromDir')
-    if (fromCat !== cat || !fromRelative || fromDir === dir) return
-
+    if (!fromRelative) return
     const fileName = fromRelative.split('/').pop()
     const toRelative = dir ? `${dir}/${fileName}` : fileName
-    const r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/move`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ category: cat, fromRelative, toRelative })
-    })
-    if (r.ok) {
-      const data = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/detail`).then(r => r.json())
-      currentDetail.data = data
-      renderFileCategory(cat, data.files[cat])
-    } else { alert('移動に失敗しました') }
+    let r
+    if (fromCat === cat) {
+      if (fromDir === dir) return
+      r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/move`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ category: cat, fromRelative, toRelative })
+      })
+    } else {
+      // カテゴリ跨ぎ移動（このフォルダへ）
+      r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/move-category`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ fromCategory: fromCat, fromRelative, toCategory: cat, toRelative })
+      })
+    }
+    if (r.ok) { await refreshDetail() } else { alert('移動に失敗しました:\n' + await readError(r)) }
   })
 
   sec.appendChild(makeDropZone(cat, dir || null))
@@ -2482,6 +2564,7 @@ function makeDropZone(cat, sub) {
   dz.ondragleave = () => dz.classList.remove('drag-over')
   dz.ondrop = (e) => {
     e.preventDefault()
+    e.stopPropagation()   // セクションへの二重伝播を防ぐ
     dz.classList.remove('drag-over')
     uploadFiles(cat, sub, e.dataTransfer.files, dz)
   }
@@ -2495,7 +2578,7 @@ async function uploadFiles(cat, sub, files, dropzone) {
   if (sub) fd.append('sub', sub)
   for (const f of files) fd.append('files', f)
 
-  dropzone.textContent = `アップロード中... (${files.length}件)`
+  if (dropzone) dropzone.textContent = `アップロード中... (${files.length}件)`
   const r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/upload`, { method: 'POST', body: fd })
   if (r.ok) {
     // 詳細を再読み込みして描画更新
@@ -2503,7 +2586,7 @@ async function uploadFiles(cat, sub, files, dropzone) {
     currentDetail.data = data
     renderFileCategory(cat, data.files[cat])
   } else {
-    dropzone.textContent = '＋ ここにファイルをドロップ、またはクリックして追加'
+    if (dropzone) dropzone.textContent = '＋ ここにファイルをドロップ、またはクリックして追加'
     alert('アップロードに失敗しました')
   }
 }
@@ -2667,6 +2750,7 @@ document.addEventListener('click', (e) => {
 })
 
 loadConfig()
+setupTabDrops()
 
 if (window.electronAPI) {
   window.electronAPI.getVersion().then(v => {

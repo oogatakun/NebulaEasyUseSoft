@@ -164,6 +164,21 @@ interface CategoryFiles {
     optionalon: FileEntry[]
     optionaloff: FileEntry[]
     isToggleable: boolean
+    folders?: string[]        // flat カテゴリの全サブフォルダ（空フォルダ含む）
+}
+
+// dirPath 以下のサブフォルダ相対パスを再帰的に収集（空フォルダも含む）
+function collectFolders(dirPath: string, basePath: string): string[] {
+    const result: string[] = []
+    if (!existsSync(dirPath)) return result
+    for (const entry of readdirSync(dirPath)) {
+        const fullPath = join(dirPath, entry)
+        if (statSync(fullPath).isDirectory()) {
+            result.push(fullPath.slice(basePath.length + 1).replace(/\\/g, '/'))
+            result.push(...collectFolders(fullPath, basePath))
+        }
+    }
+    return result
 }
 
 // dirPath 以下のファイルを再帰的に収集（basePath からの相対パスを relativePath に）
@@ -215,6 +230,7 @@ function listCategory(categoryPath: string): CategoryFiles {
     } else {
         // flat: サブディレクトリも再帰的に収集
         result.flat = collectFiles(categoryPath, categoryPath)
+        result.folders = collectFolders(categoryPath, categoryPath)  // 空フォルダ含む
     }
     return result
 }
@@ -478,6 +494,50 @@ app.post('/api/servers/:name/move', async (req, res) => {
         await rename(fromPath, toPath)
         res.json({ ok: true })
     } catch (e) { res.status(500).json({ error: String(e) }) }
+})
+
+// --- Move file across categories（タブ間移動） ---
+// forgemods/fabricmods へ入れる場合は optionalon に、files/libraries は直下に置く。
+// .link.json の相棒があれば一緒に移動する。
+app.post('/api/servers/:name/move-category', async (req, res) => {
+    const serverDir = getServerDir(req.params.name)
+    const { fromCategory, fromRelative, toCategory, toRelative } = req.body as { fromCategory: string; fromRelative: string; toCategory: string; toRelative?: string }
+    const ALLOWED = ['forgemods', 'fabricmods', 'files', 'libraries']
+    if (!ALLOWED.includes(fromCategory) || !ALLOWED.includes(toCategory)) { res.status(400).json({ error: '不正なカテゴリです' }); return }
+    if (fromCategory === toCategory) { res.status(400).json({ error: '同じカテゴリです' }); return }
+    const MOD_CATS = ['forgemods', 'fabricmods']
+    const fileName = basename(fromRelative)
+    // toRelative 指定があればその位置へ、無ければ既定（mod系=optionalon、それ以外=直下）
+    const toSubPath = (toRelative && toRelative.trim())
+        ? toRelative.replace(/\\/g, '/')
+        : (MOD_CATS.includes(toCategory) ? `optionalon/${fileName}` : fileName)
+    const fromPath = join(serverDir, fromCategory, fromRelative)
+    const toPath = join(serverDir, toCategory, toSubPath)
+    if (!fromPath.startsWith(serverDir) || !toPath.startsWith(serverDir)) { res.status(400).json({ error: 'Invalid path' }); return }
+    if (!existsSync(fromPath)) { res.status(404).json({ error: 'ファイルが見つかりません' }); return }
+    try {
+        await mkdir(dirname(toPath), { recursive: true })
+        await rename(fromPath, toPath)
+        // .link.json の相棒も移動
+        if (existsSync(`${fromPath}.link.json`)) {
+            await rename(`${fromPath}.link.json`, `${toPath}.link.json`)
+        }
+        res.json({ ok: true, toSub: MOD_CATS.includes(toCategory) ? 'optionalon' : '' })
+    } catch (e) { res.status(500).json({ error: String(e) }) }
+})
+
+// --- フォルダ作成（files 等） ---
+app.post('/api/servers/:name/mkdir', async (req, res) => {
+    const serverDir = getServerDir(req.params.name)
+    const { category, folderPath } = req.body as { category: string; folderPath: string }
+    const ALLOWED = ['forgemods', 'fabricmods', 'files', 'libraries']
+    if (!ALLOWED.includes(category)) { res.status(400).json({ error: '不正なカテゴリです' }); return }
+    const clean = (folderPath || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+    if (!clean || clean.split('/').some(p => p === '..' || p === '.')) { res.status(400).json({ error: 'フォルダ名が不正です' }); return }
+    const target = join(serverDir, category, clean)
+    if (!target.startsWith(serverDir)) { res.status(400).json({ error: 'Invalid path' }); return }
+    try { await mkdir(target, { recursive: true }); res.json({ ok: true }) }
+    catch (e) { res.status(500).json({ error: String(e) }) }
 })
 
 // --- jar を .link.json 化 ---
@@ -839,6 +899,38 @@ app.post('/api/git/remove-distribution', async (_req, res) => {
     if (!repoPath || !existsSync(repoPath)) { res.status(400).json({ error: 'リポジトリパスが未設定または存在しません' }); return }
     try { res.json({ ok: true, message: await removeDistributionAndCommit(repoPath, branch) }) }
     catch (e) { res.status(500).json({ error: String(e) }) }
+})
+
+// ワンクリック配信（完全リフレッシュ）: 生成→置換→コミット→削除コミット→ROOTへ置換→生成→置換→コミット
+app.post('/api/git/full-republish', async (_req, res) => {
+    const env = getEnvConfig()
+    const asset = getAssetConfig()
+    const { repoPath, branch, commitMsg } = getGitConfig()
+    if (!env.ROOT) { res.status(400).json({ error: 'ROOTが未設定です' }); return }
+    if (!repoPath || !existsSync(repoPath)) { res.status(400).json({ error: 'リポジトリパスが未設定または存在しません' }); return }
+    const log = (m: string) => sseManager.broadcast({ type: 'log', level: 'info', message: m })
+    const root = resolvePath(env.ROOT)
+    const gen = async (): Promise<void> => {
+        const ext = await scanAndExternalize(root, asset.repo, asset.tag, asset.threshold)
+        if (ext.length) log(`外部リリース化: ${ext.join(', ')}`)
+        await cmdGenerateDistro(getEnvConfig(), 'distribution', false, false, false)
+    }
+    sseManager.broadcast({ type: 'start' })
+    try {
+        log('① Distribution 生成...'); await gen()
+        log('② ROOT → リポジトリへ置き換え...'); await syncToRepo(root, repoPath)
+        log('③ コミット＆プッシュ...'); log(await gitCommitPush(repoPath, commitMsg, branch))
+        log('④ distribution.json を削除してコミット...'); log(await removeDistributionAndCommit(repoPath, branch))
+        log('⑤ リポジトリ → ROOT へ置き換え...'); await syncFromRepo(root, repoPath)
+        log('⑥ Distribution 生成...'); await gen()
+        log('⑦ ROOT → リポジトリへ置き換え...'); await syncToRepo(root, repoPath)
+        log('⑧ コミット＆プッシュ...'); log(await gitCommitPush(repoPath, commitMsg, branch))
+        sseManager.broadcast({ type: 'done', success: true })
+        res.json({ ok: true })
+    } catch (e) {
+        sseManager.broadcast({ type: 'done', success: false, error: String(e) })
+        res.status(500).json({ error: String(e) })
+    }
 })
 
 const PORT = process.env.PORT ?? 3000
