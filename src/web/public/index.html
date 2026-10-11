@@ -2508,17 +2508,22 @@ function makeFileItem(cat, file, currentSub, isToggleable, hasOverride) {
     unBtn.className = 'file-action-btn'
     unBtn.style.color = '#58a6ff'
     unBtn.textContent = '☁ 解除'
-    unBtn.title = 'Releaseからjarを復元し、外部配信を解除します'
+    unBtn.title = 'Releaseからjarを復元し、外部配信を解除します（Releaseのアセットも削除）'
     unBtn.onclick = async (e) => {
       e.stopPropagation()
       const jarName = file.name.replace(/\.link\.json$/i, '')
       const jarRel = file.relativePath.replace(/\.link\.json$/i, '')
-      if (!confirm(`「${jarName}」の外部配信を解除し、jarを復元しますか？`)) return
+      if (!confirm(`「${jarName}」の外部配信を解除し、jarを復元しますか？\n（Release側のアセットも削除されます）`)) return
       unBtn.disabled = true; unBtn.textContent = '復元中...'
       const r = await fetch(`/api/servers/${encodeURIComponent(currentDetail.name)}/unexternalize`, {
         method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ category: cat, relativePath: jarRel })
       })
-      if (r.ok) openDetail(currentDetail.name)
+      if (r.ok) {
+        const d = await r.json()
+        const note = d.assetDeleted ? 'Releaseのアセットも削除しました。' : (d.assetError ? ('⚠ Releaseアセットの削除に失敗: ' + d.assetError) : 'Releaseに該当アセットはありませんでした。')
+        alert(`✓ 「${jarName}」を復元しました。\n${note}`)
+        openDetail(currentDetail.name)
+      }
       else { alert('解除に失敗しました:\n' + await readError(r)); unBtn.disabled = false; unBtn.textContent = '☁ 解除' }
     }
     div.appendChild(unBtn)

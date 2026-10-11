@@ -94,6 +94,24 @@ export async function findAssetUrl(repoSpec: string, releaseId: number, assetNam
     return hit ? hit.browser_download_url : null
 }
 
+// Release の直リンクURLから、該当アセットを削除する。
+// GitHub Release のURLでない場合は何もしない（false）。削除できたら true。
+export async function deleteReleaseAssetByUrl(url: string): Promise<boolean> {
+    const m = url.match(/github\.com\/([^/]+)\/([^/]+)\/releases\/download\/([^/]+)\/(.+)$/)
+    if (!m) return false
+    const owner = m[1], repo = m[2], tag = m[3], assetName = m[4]
+    const relRes = await fetch(`${API}/repos/${owner}/${repo}/releases/tags/${encodeURIComponent(tag)}`, { headers: await authHeaders() })
+    if (relRes.status !== 200) return false
+    const rel = await relRes.json() as { id: number }
+    const assets = await listAssets(owner, repo, rel.id)
+    const decoded = decodeURIComponent(assetName)
+    const hit = assets.find(a => a.name === assetName || a.name === decoded)
+    if (!hit) return false
+    const del = await fetch(`${API}/repos/${owner}/${repo}/releases/assets/${hit.id}`, { method: 'DELETE', headers: await authHeaders() })
+    if (del.status !== 204) throw new Error(`アセット削除に失敗しました (HTTP ${del.status})`)
+    return true
+}
+
 // ファイルをアップロード（同名があれば削除してから）。browser_download_url を返す。
 export async function uploadReleaseAsset(repoSpec: string, releaseId: number, filePath: string, assetName: string): Promise<string> {
     const { owner, repo } = parseRepo(repoSpec)

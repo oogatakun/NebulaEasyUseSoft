@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, statSync, unlinkSync, existsSync, readdirS
 import { createHash } from 'crypto'
 import { join, basename, resolve as resolvePath } from 'path'
 import StreamZip from 'node-stream-zip'
-import { ensureRelease, uploadReleaseAsset } from './githubRelease.js'
+import { ensureRelease, uploadReleaseAsset, deleteReleaseAssetByUrl } from './githubRelease.js'
 
 export interface ExternalizeResult { module: Record<string, unknown>; linkFile: string; url: string }
 
@@ -76,7 +76,7 @@ export async function externalizeFile(
 }
 
 // 外部化の解除: Release から jar をダウンロードして復元し、.link.json を削除する。
-export async function unexternalizeFile(serverDir: string, category: string, relativePath: string): Promise<{ restored: string }> {
+export async function unexternalizeFile(serverDir: string, category: string, relativePath: string): Promise<{ restored: string; assetDeleted: boolean; assetError?: string }> {
     const rel = relativePath.replace(/\\/g, '/')
     const jarPath = join(serverDir, category, rel)
     const linkPath = `${jarPath}.link.json`
@@ -89,8 +89,15 @@ export async function unexternalizeFile(serverDir: string, category: string, rel
     if (!res.ok) throw new Error(`ダウンロードに失敗しました (HTTP ${res.status}): ${url}`)
     const dl = Buffer.from(await res.arrayBuffer())
     writeFileSync(jarPath, dl)
+
+    // jar 復元に成功したので、Release 側のアセットも削除する（GitHub Release URL の場合）
+    let assetDeleted = false
+    let assetError: string | undefined
+    try { assetDeleted = await deleteReleaseAssetByUrl(url) }
+    catch (e) { assetError = String(e) }
+
     unlinkSync(linkPath)
-    return { restored: basename(jarPath) }
+    return { restored: basename(jarPath), assetDeleted, assetError }
 }
 
 const MOD_CATEGORIES = ['forgemods', 'fabricmods', 'files']
