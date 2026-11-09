@@ -250,6 +250,36 @@
   .gl-verdict.gl-ok { background: rgba(76,175,80,0.12); border-color: var(--success); }
   .gl-verdict.gl-bad { background: rgba(244,67,54,0.10); border-color: var(--error); }
   .gl-verdict.gl-warn { background: rgba(255,152,0,0.12); border-color: var(--warn); }
+  /* 公開ページ */
+  .pub-check { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; padding: 4px 0; font-size: 0.88rem; }
+  .pub-check .pub-mark { width: 1.2em; font-weight: bold; }
+  .pub-check.ok .pub-mark { color: var(--success); }
+  .pub-check.warn .pub-mark { color: var(--warn); }
+  .pub-check.error .pub-mark { color: var(--error); }
+  .pub-check .pub-detail { color: var(--text-muted); font-size: 0.8rem; }
+  .pub-fix { color: var(--warn); font-size: 0.82rem; }
+  .pub-progress { margin-bottom: 12px; }
+  .pub-progress-head { display: flex; justify-content: space-between; gap: 10px; font-size: 0.85rem; margin-bottom: 5px; }
+  .pub-progress-head #pub-progress-pct { font-weight: bold; font-variant-numeric: tabular-nums; }
+  .pub-progress-track { height: 12px; background: var(--surface2); border-radius: 6px; overflow: hidden; }
+  .pub-progress-fill { height: 100%; width: 0; background: var(--accent); border-radius: 6px; transition: width 0.35s ease-out, background 0.2s; }
+  .pub-progress-fill.done { background: var(--success); }
+  .pub-progress-fill.error { background: var(--error); }
+  .pub-stages { list-style: none; margin: 0; padding: 0; }
+  .pub-stages li { display: flex; gap: 8px; align-items: baseline; padding: 5px 0; font-size: 0.92rem; color: var(--text-muted); }
+  .pub-stages li .pub-ico { width: 1.4em; text-align: center; }
+  .pub-stages li .pub-msg { font-size: 0.78rem; margin-left: auto; max-width: 55%; text-align: right; overflow-wrap: anywhere; }
+  .pub-stages li.running { color: var(--text); }
+  .pub-stages li.done { color: var(--success); }
+  .pub-stages li.warn { color: var(--warn); }
+  .pub-stages li.error { color: var(--error); font-weight: bold; }
+  .pub-result { border: 1px solid #444; border-radius: 6px; padding: 10px 12px; margin-top: 4px; }
+  .pub-result.ok { border-color: var(--success); background: rgba(76,175,80,0.10); }
+  .pub-result.warn { border-color: var(--warn); background: rgba(255,152,0,0.10); }
+  .pub-result.error { border-color: var(--error); background: rgba(244,67,54,0.08); }
+  .pub-result-title { font-weight: bold; }
+  .pub-result-where, .pub-result-hint { font-size: 0.85rem; margin-top: 4px; }
+  .pub-strong { color: var(--warn); font-weight: bold; }
 
   h2 { font-size: 1.1rem; margin-bottom: 16px; color: var(--accent); }
   .form-group { margin-bottom: 14px; }
@@ -266,6 +296,19 @@
     transition: border-color 0.15s;
   }
   input:focus { border-color: var(--accent); }
+  .form-group select {
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--surface2);
+    border: 1px solid #444;
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .form-group select:focus { border-color: var(--accent); }
+  .form-group select option { background: var(--surface2); color: var(--text); }
   /* カスタムプロファイル選択ドロップダウン（ネイティブ<select>の描画不具合回避） */
   .profile-dd {
     padding: 8px 10px;
@@ -681,8 +724,10 @@
 <div class="layout">
   <nav id="sidebar">
     <button class="nav-hamburger" onclick="toggleNav()" title="メニューを折りたたむ"><span>☰</span></button>
+    <div class="section-label">かんたん操作</div>
+    <button onclick="showPage('publish');loadPublishPage()" class="active" id="nav-publish"><span class="nav-icon">🚀</span><span class="nav-text"> 公開</span></button>
     <div class="section-label">設定</div>
-    <button onclick="showPage('config')" class="active" id="nav-config"><span class="nav-icon">⚙</span><span class="nav-text"> 環境設定</span></button>
+    <button onclick="showPage('config')" id="nav-config"><span class="nav-icon">⚙</span><span class="nav-text"> 環境設定</span></button>
     <div class="section-label">概要</div>
     <button onclick="showPage('servers');loadServers()" id="nav-servers"><span class="nav-icon">📋</span><span class="nav-text"> サーバー一覧</span></button>
     <div class="section-label">初期化</div>
@@ -781,8 +826,48 @@
 
       <div class="form-panel">
 
+        <!-- PUBLISH -->
+        <div class="page active" id="page-publish">
+          <h2>🚀 公開</h2>
+          <div class="note" style="margin-bottom:12px;">編集が終わったら「公開する」を押すだけです。他の人が先に更新しているときは、先に「最新を取り込む」を押してください。</div>
+
+          <div class="card" style="margin-bottom:12px;">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+              <span>準備チェック</span>
+              <span style="display:flex;align-items:center;gap:8px;">
+                <span id="pub-recheck-note" style="font-size:0.78rem;opacity:0.8;"></span>
+                <button class="btn btn-secondary nolock" id="btn-recheck" style="padding:3px 10px;font-size:0.78rem;margin:0" onclick="loadPublishPage()">↻ 再チェック</button>
+              </span>
+            </div>
+            <div id="pub-checks">確認しています…</div>
+          </div>
+
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+            <button class="btn" id="btn-publish" style="background:#1a5c2e;border-color:#2d8a4e;font-size:1rem;padding:10px 22px;margin:0" onclick="runPublish()" disabled>🚀 公開する</button>
+            <button class="btn btn-secondary" id="btn-pull-latest" style="margin:0" onclick="runPullLatest()">📥 最新を取り込む</button>
+          </div>
+
+          <div class="card" style="margin-bottom:12px;">
+            <div class="card-title">進み具合</div>
+            <div id="pub-progress" class="pub-progress" style="display:none">
+              <div class="pub-progress-head"><span id="pub-progress-label"></span><span id="pub-progress-pct">0%</span></div>
+              <div class="pub-progress-track"><div id="pub-progress-fill" class="pub-progress-fill"></div></div>
+            </div>
+            <ol id="pub-stages" class="pub-stages">
+              <li data-stage="generate" class="wait"><span class="pub-ico">・</span><span class="pub-label">① 配信データを作る</span><span class="pub-msg"></span></li>
+              <li data-stage="reflect" class="wait"><span class="pub-ico">・</span><span class="pub-label">② 公開用フォルダへ反映</span><span class="pub-msg"></span></li>
+              <li data-stage="send" class="wait"><span class="pub-ico">・</span><span class="pub-label">③ GitHub に送る</span><span class="pub-msg"></span></li>
+              <li data-stage="reinstall" class="wait"><span class="pub-ico">・</span><span class="pub-label">④ 入れ直し（確実に反映）</span><span class="pub-msg"></span></li>
+              <li data-stage="verify" class="wait"><span class="pub-ico">・</span><span class="pub-label">⑤ 公開結果を確認</span><span class="pub-msg"></span></li>
+            </ol>
+          </div>
+
+          <div id="pub-result"></div>
+          <div id="pub-last" style="color:var(--text-muted);font-size:0.82rem;margin-top:8px;"></div>
+        </div>
+
         <!-- CONFIG -->
-        <div class="page active" id="page-config">
+        <div class="page" id="page-config">
           <h2>⚙ 環境設定</h2>
 
           <!-- プロファイル選択 -->
@@ -879,23 +964,30 @@
         <!-- GEN SERVER -->
         <div class="page" id="page-gen-server">
           <h2>🖥 サーバー生成</h2>
-          <div class="note warn">Forge と Fabric は同時に指定できません。</div>
           <div class="form-group">
             <label>サーバー ID *</label>
             <input type="text" id="srv-id" placeholder="例: Test1">
           </div>
           <div class="form-group">
+            <label>ローダー</label>
+            <select id="srv-loader" onchange="onGenLoaderChange()">
+              <option value="none">なし（バニラ）</option>
+              <option value="forge">Forge</option>
+              <option value="fabric">Fabric</option>
+            </select>
+          </div>
+          <div class="form-group">
             <label>Minecraft バージョン *</label>
-            <input type="text" id="srv-version" placeholder="例: 1.12.2">
+            <select id="srv-version" onchange="onGenMcChange()"></select>
+            <input type="text" id="srv-version-manual" placeholder="例: 1.12.2" style="display:none" oninput="genUpdateForgeWarn()">
           </div>
-          <div class="form-group">
-            <label>Forge バージョン (任意)</label>
-            <input type="text" id="srv-forge" placeholder="例: 14.23.5.2847 または latest / recommended">
+          <div class="form-group" id="srv-lv-group" style="display:none">
+            <label id="srv-lv-label">ローダーのバージョン</label>
+            <select id="srv-loader-version"></select>
+            <input type="text" id="srv-loader-version-manual" placeholder="例: 14.23.5.2847 または latest / recommended" style="display:none">
           </div>
-          <div class="form-group">
-            <label>Fabric バージョン (任意)</label>
-            <input type="text" id="srv-fabric" placeholder="例: 0.15.11 または latest">
-          </div>
+          <div class="hint" id="srv-ver-status"></div>
+          <div class="note warn" id="srv-forge-warn" style="display:none">⚠ Forge 1.20.3 以降は、今のランチャーでは mod が読み込まれない可能性があります（Forge 側で <code>--fml.modLists</code> が廃止されたため）。mod を使うサーバーは Fabric がおすすめです。</div>
           <button class="btn" onclick="runGenServer()" id="btn-gen-server">▶ 生成</button>
         </div>
 
@@ -1065,12 +1157,7 @@
             </div>
           </div>
 
-          <!-- ワンクリック配信 -->
-          <div class="card" style="margin-bottom:12px;background:rgba(46,138,78,0.08);border:1px solid #2d8a4e;">
-            <div class="card-title">🚀 ワンクリック配信（完全リフレッシュ）</div>
-            <div class="note" style="margin:6px 0;">生成 → リポジトリへ置き換え → コミット → distribution削除コミット → ROOTへ置き換え → 生成 → 置き換え → コミット を自動で順に実行します（distribution.jsonの反映確実化）。</div>
-            <button class="btn" id="btn-git-full" style="background:#1a5c2e;border-color:#2d8a4e" onclick="gitFullRepublish()">🚀 ワンクリック配信を実行</button>
-          </div>
+          <div class="note" style="margin-bottom:12px;">公開（生成 → 反映 → 送信）は、メニュー先頭の「🚀 公開」ページで行えます。このページは個別に操作したいとき用です。</div>
 
           <!-- 操作ボタン -->
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
@@ -1180,6 +1267,12 @@ es.onmessage = (e) => {
       if (cmdRunning) kickWatchdog() // ログが来ている間は生存とみなしタイマー延長
     } else if (data.type === 'start') {
       markRunning()
+    } else if (data.type === 'publish') {
+      onPublishEvent(data)                    // 公開ページの進み具合
+      if (cmdRunning) kickWatchdog()          // 段階の通知が来ている間は生存とみなす
+    } else if (data.type === 'progress') {
+      setPubProgress(data.percent, data.next, data.label)   // 「最新を取り込む」の進み具合
+      if (cmdRunning) kickWatchdog()
     } else if (data.type === 'done') {
       if (data.success) {
         markIdle('ok', '完了')
@@ -1223,6 +1316,16 @@ function explainError(raw) {
   // Git 未インストール
   if (has('spawn') && has('git') && has('enoent')) return { title: 'Git for Windows が見つかりません', hint: '<b>Git for Windows</b> をインストールしてください（gitforwindows.org）。インストール後に「Git連携を確認・認証」をお試しください。', detail }
 
+  // Git の典型的なエラー（汎用の 403/404 などより先に判定する）
+  // GitHub 側が送信を拒否（"! [remote rejected] … (pre-receive hook declined)" は non-fast-forward 系の [rejected] より先に判定する）
+  if (has('remote rejected', 'gh00', 'pre-receive hook declined', 'file exceeds', 'large files detected')) return { title: 'GitHub が送信を拒否しました', hint: '100MB を超えるファイルが含まれていないか確認してください（大きいファイルは外部リリース化が必要です）。詳細はログを確認してください。', detail }
+  if (has('non-fast-forward', 'fetch first', 'failed to push some refs', '[rejected]', 'updates were rejected')) return { title: '他の人が先に更新しています', hint: '先に <b>「最新を取り込む」</b> を押してから、もう一度「公開する」を押してください。', detail }
+  if (has('authentication failed', 'could not read username', 'could not read password', 'terminal prompts disabled', 'returned error: 403', 'returned error: 401') || (has('permission to') && has('denied'))) return { title: 'GitHub の認証が必要です', hint: 'GitHub 連携ページで <b>「Git連携を確認・認証」</b> を実行してから、もう一度お試しください。', detail }
+  if (has('index.lock')) return { title: '別の Git 処理が実行中です', hint: '少し待ってから、もう一度お試しください。何度も出る場合は、他のアプリで Git を使っていないか確認してください。', detail }
+  if (has('not a git repository')) return { title: '公開用フォルダが Git リポジトリではありません', hint: 'GitHub 連携ページで「ローカル Git リポジトリのパス」を確認してください。', detail }
+  if (has('could not resolve host', 'unable to access', 'failed to connect', 'connection timed out')) return { title: '通信できません', hint: 'インターネット接続を確認して、もう一度お試しください。', detail }
+  if (has('別の公開処理が実行中')) return { title: '別の公開処理が実行中です', hint: '今の処理が終わってから、もう一度お試しください。', detail }
+
   // Java 未検出／未設定
   if (has('spawn') && has('java') && has('enoent')) return { title: 'Java が見つかりません', hint: '環境設定のプロファイルで <b>JAVA_EXECUTABLE</b> に java.exe（または java）の正しいパスを設定してください。Java 未インストールの場合はインストールが必要です。', detail }
   if (has("'file' argument", 'argument must be of type string') && (has('java') || has('undefined'))) return { title: 'Java の実行パスが未設定です', hint: '環境設定のプロファイルで <b>JAVA_EXECUTABLE</b> に java.exe のパスを設定してください。', detail }
@@ -1246,7 +1349,7 @@ function explainError(raw) {
   if (has('enospc', 'no space')) return { title: 'ディスクの空き容量が不足しています', hint: '不要なファイルを削除して空き容量を確保してから再試行してください。', detail }
   if (has('enoent')) {
     const m = s.match(/['"]([A-Za-z]:[\\/][^'"]+|\/[^'"]+)['"]/)
-    return { title: 'ファイルまたはフォルダが見つかりません', hint: (m ? `対象: <b>${m[1]}</b><br>` : '') + 'パス（ROOT ディレクトリ、ZIP名など）が正しいかを確認してください。', detail }
+    return { title: 'ファイルまたはフォルダが見つかりません', hint: (m ? `対象: <b>${pubEsc(m[1])}</b><br>` : '') + 'パス（ROOT ディレクトリ、ZIP名など）が正しいかを確認してください。', detail }
   }
 
   // 設定不足（アプリ自身のメッセージ。ほぼ日本語なのでそのまま活かす）
@@ -1330,6 +1433,8 @@ function setStatus(state, text) {
 function disableButtons(disabled) {
   // .nolock を付けたボタン（プロファイル操作など）はコマンド実行中も無効化しない
   document.querySelectorAll('.btn:not(.nolock)').forEach(b => { b.disabled = disabled })
+  // 公開ボタンは、準備が足りない間は再有効化しない
+  if (typeof applyPublishButtonState === 'function') applyPublishButtonState()
 }
 
 function showPage(name) {
@@ -1342,6 +1447,7 @@ function showPage(name) {
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'))
   document.getElementById('page-' + name).classList.add('active')
   document.getElementById('nav-' + name).classList.add('active')
+  if (name === 'gen-server') loadGenMcVersions(document.getElementById('srv-version').value)
 }
 
 // レスポンスからエラーメッセージを安全に取り出す（500 が JSON でなく HTML/テキストの場合にも対応）
@@ -1694,12 +1800,127 @@ async function post(url, body = {}) {
 
 function runInitRoot() { post('/api/init-root') }
 
+// --- サーバー生成: バージョンのプルダウン ---
+let genVerSeq = 0       // 古い応答が新しい選択を上書きしないための世代番号
+let genManual = false   // 一覧が取れず手入力に切り替えている間 true
+
+async function genGetJson(url) {
+  const r = await fetch(url)
+  const d = await r.json().catch(() => ({}))
+  if (!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
+  return d
+}
+
+function genFillSelect(sel, items, selected, markValue) {
+  sel.innerHTML = ''
+  for (const v of items) {
+    const o = document.createElement('option')
+    o.value = v
+    o.textContent = v === markValue ? v + '（おすすめ）' : v
+    sel.appendChild(o)
+  }
+  if (selected && items.includes(selected)) sel.value = selected
+}
+
+function genStatus(msg) { document.getElementById('srv-ver-status').textContent = msg || '' }
+
+// Forge 1.20.3 以降は、ランチャーが渡す --fml.modLists が使えず mod が読み込まれない可能性があるため警告する
+function genUpdateForgeWarn() {
+  const loader = document.getElementById('srv-loader').value
+  const mc = (genManual ? document.getElementById('srv-version-manual') : document.getElementById('srv-version')).value.trim()
+  const m = /^(\d+)\.(\d+)(?:\.(\d+))?/.exec(mc)
+  let show = false
+  if (loader === 'forge' && m) {
+    const [maj, min, rev] = [Number(m[1]), Number(m[2]), Number(m[3] || 0)]
+    show = maj > 1 || min > 20 || (min === 20 && rev >= 3)
+  }
+  document.getElementById('srv-forge-warn').style.display = show ? '' : 'none'
+}
+
+function genApplyLayout() {
+  genUpdateForgeWarn()
+  const loader = document.getElementById('srv-loader').value
+  document.getElementById('srv-lv-group').style.display = loader === 'none' ? 'none' : ''
+  document.getElementById('srv-lv-label').textContent = loader === 'forge' ? 'Forge のバージョン' : 'Fabric Loader のバージョン'
+  for (const id of ['srv-version', 'srv-loader-version']) {
+    document.getElementById(id).style.display = genManual ? 'none' : ''
+    document.getElementById(id + '-manual').style.display = genManual ? '' : 'none'
+  }
+}
+
+async function loadGenMcVersions(keepMc) {
+  const seq = ++genVerSeq
+  const loader = document.getElementById('srv-loader').value
+  genStatus('バージョン一覧を取得しています…')
+  try {
+    const d = await genGetJson('/api/versions/minecraft?loader=' + encodeURIComponent(loader))
+    if (seq !== genVerSeq) return
+    genManual = false
+    genFillSelect(document.getElementById('srv-version'), d.versions, keepMc)
+    genApplyLayout()
+    genStatus(d.stale ? '最新の一覧を取得できなかったため、前回取得した一覧を表示しています。' : '')
+    await loadGenLoaderVersions(seq)
+  } catch (e) {
+    if (seq !== genVerSeq) return
+    genManual = true
+    genApplyLayout()
+    genStatus('バージョン一覧を取得できませんでした。手入力してください（' + e.message + '）')
+  }
+}
+
+async function loadGenLoaderVersions(seq) {
+  const loader = document.getElementById('srv-loader').value
+  if (loader === 'none') return
+  const mc = document.getElementById('srv-version').value
+  const sel = document.getElementById('srv-loader-version')
+  if (!mc) { sel.innerHTML = ''; return }
+  try {
+    const d = await genGetJson('/api/versions/loader?loader=' + encodeURIComponent(loader) + '&mc=' + encodeURIComponent(mc))
+    if (seq !== genVerSeq) return
+    genFillSelect(sel, d.versions, d.default, d.default)
+    if (d.stale) genStatus('最新の一覧を取得できなかったため、前回取得した一覧を表示しています。')
+    else if (d.versions.length === 0) genStatus(mc + ' に対応する ' + (loader === 'forge' ? 'Forge' : 'Fabric') + ' のバージョンがありません。')
+  } catch (e) {
+    if (seq !== genVerSeq) return
+    genManual = true
+    genApplyLayout()
+    genStatus('バージョン一覧を取得できませんでした。手入力してください（' + e.message + '）')
+  }
+}
+
+function onGenLoaderChange() {
+  loadGenMcVersions(genManual ? '' : document.getElementById('srv-version').value)
+}
+
+function onGenMcChange() {
+  genUpdateForgeWarn()
+  const seq = ++genVerSeq
+  loadGenLoaderVersions(seq)
+}
+
+function selectGenServerMc(loader, mc) {
+  document.getElementById('srv-loader').value = loader
+  // 一覧の取得は非同期なので、選択を先に select へ反映する（直後の showPage の再読み込みが keepMc として拾う）
+  const sel = document.getElementById('srv-version')
+  if (![...sel.options].some(o => o.value === mc)) {
+    const o = document.createElement('option')
+    o.value = mc
+    o.textContent = mc
+    sel.appendChild(o)
+  }
+  sel.value = mc
+  return loadGenMcVersions(mc)
+}
+
 function runGenServer() {
+  const loader = document.getElementById('srv-loader').value
+  const pick = (id) => (genManual ? document.getElementById(id + '-manual') : document.getElementById(id)).value.trim()
+  const lv = loader === 'none' ? '' : pick('srv-loader-version')
   post('/api/generate-server', {
     id: document.getElementById('srv-id').value,
-    version: document.getElementById('srv-version').value,
-    forge: document.getElementById('srv-forge').value,
-    fabric: document.getElementById('srv-fabric').value
+    version: pick('srv-version'),
+    forge: loader === 'forge' ? lv : '',
+    fabric: loader === 'fabric' ? lv : ''
   })
 }
 
@@ -2085,15 +2306,269 @@ async function gitSync() {
   } else { gitError('置き換え失敗', data.error) }
 }
 
-async function gitFullRepublish() {
-  if (!confirm('ワンクリック配信を実行します。\n\n生成 → ROOT→リポジトリ置き換え → コミット＆プッシュ → distribution削除コミット → リポジトリ→ROOT置き換え → 生成 → 置き換え → コミット＆プッシュ\n\nを自動で順に実行します（数分かかる場合があります）。よろしいですか？')) return
-  const btn = document.getElementById('btn-git-full')
-  if (btn) { btn.disabled = true }
-  const r = await fetch('/api/git/full-republish', { method: 'POST' })
-  // 進捗は実行ログ（SSE）に表示されます
-  if (!r.ok) { const d = await r.json().catch(()=>({})); alert('ワンクリック配信に失敗しました:\n' + (d.error || ('HTTP ' + r.status))) }
-  else { alert('✓ ワンクリック配信が完了しました。') }
-  if (btn) { btn.disabled = false }
+// ===== 🚀 公開ページ =====
+const PUB_ICON = { wait: '・', running: '⏳', done: '✓', error: '✗', warn: '⚠' }
+const PUB_STAGE_LABEL = { generate: '① 配信データを作る', reflect: '② 公開用フォルダへ反映', send: '③ GitHub に送る', reinstall: '④ 入れ直し', verify: '⑤ 公開結果を確認' }
+const PUB_FIX = {
+  config: { label: '→ 環境設定へ', run: "showPage('config')" },
+  github: { label: '→ GitHub 連携へ', run: "showPage('github');loadGitPage()" },
+  pull:   { label: '→ 最新を取り込む', run: 'runPullLatest()' },
+}
+let publishCanRun = false
+let pubBusy = false   // この画面から「公開する」「最新を取り込む」を送信して応答を待っている間
+
+
+function pubEsc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]))
+}
+
+// explainError の結果。分類に当てはまらない（アプリ自身の日本語メッセージなど）ときは、そのまま見出しにする。
+function pubExplain(raw) {
+  const info = explainError(raw)
+  if (info.title === 'エラーが発生しました') {
+    return { title: String(raw ?? '').replace(/^error:\s*/i, ''), hint: '詳しいログを見て、解決しない場合はこの内容を添えてお問い合わせください。' }
+  }
+  return info
+}
+
+// ボタンの有効/無効。他の処理の実行中、または準備が足りない間は「公開する」を押せない。
+function applyPublishButtonState() {
+  const pubBtn = document.getElementById('btn-publish')
+  if (pubBtn) pubBtn.disabled = cmdRunning || pubBusy || !publishCanRun
+  const pullBtn = document.getElementById('btn-pull-latest')
+  if (pullBtn) pullBtn.disabled = cmdRunning || pubBusy
+  // 「↻ 再チェック」は .nolock で全体の無効化から外れているので、ここで実行中だけ無効にする
+  const recheckBtn = document.getElementById('btn-recheck')
+  if (recheckBtn) recheckBtn.disabled = cmdRunning || pubBusy
+}
+
+// --- 進み具合のバー（目安の％）---
+// サーバーから来る percent（ここまでの進み具合）と next（今の処理が終わったときの値）を受け取り、
+// 処理の途中は next の手前までゆっくり進めて、止まって見えないようにする。
+const pubProg = { cur: 0, next: 0, timer: 0, state: '' }   // state: ''（進行中）/ 'done' / 'error'（終わった後に遅れて届いた通知で戻さない）
+
+function renderPubProgress() {
+  document.getElementById('pub-progress-fill').style.width = pubProg.cur + '%'
+  document.getElementById('pub-progress-pct').textContent = Math.floor(pubProg.cur) + '%'
+}
+
+function stopPubProgressTimer() {
+  if (pubProg.timer) { clearInterval(pubProg.timer); pubProg.timer = 0 }
+}
+
+function resetPubProgress() {
+  stopPubProgressTimer()
+  pubProg.cur = 0
+  pubProg.next = 0
+  pubProg.state = ''
+  document.getElementById('pub-progress').style.display = 'none'
+  document.getElementById('pub-progress-fill').className = 'pub-progress-fill'
+  renderPubProgress()
+}
+
+function setPubProgress(percent, next, label) {
+  if (pubProg.state) return
+  const percentNum = Number(percent)
+  if (!Number.isFinite(percentNum)) return
+  document.getElementById('pub-progress').style.display = ''
+  document.getElementById('pub-progress-fill').className = 'pub-progress-fill'
+  pubProg.cur = Math.max(pubProg.cur, Math.min(100, percentNum))
+  pubProg.next = Math.min(100, Math.max(pubProg.cur, Number(next) || percentNum))
+  if (label !== undefined) document.getElementById('pub-progress-label').textContent = label
+  renderPubProgress()
+  if (!pubProg.timer) {
+    pubProg.timer = setInterval(() => {
+      const ceiling = pubProg.next - 1   // next には届かせない（終わった通知が来るまで）
+      if (pubProg.cur < ceiling) { pubProg.cur += Math.max(0.05, (ceiling - pubProg.cur) * 0.04); renderPubProgress() }
+    }, 300)
+  }
+}
+
+// 終わり。state は 'done'（100% にして緑）か 'error'（その場で止めて赤）。始まっていなければ何もしない
+function finishPubProgress(state, label) {
+  const box = document.getElementById('pub-progress')
+  if (box.style.display === 'none' || pubProg.state) return
+  pubProg.state = state
+  stopPubProgressTimer()
+  if (state === 'done') pubProg.cur = 100
+  document.getElementById('pub-progress-fill').className = 'pub-progress-fill ' + state
+  if (label !== undefined) document.getElementById('pub-progress-label').textContent = label
+  renderPubProgress()
+}
+
+function resetPublishStages() {
+  resetPubProgress()
+  document.querySelectorAll('#pub-stages li').forEach(li => {
+    li.className = 'wait'
+    li.querySelector('.pub-ico').textContent = PUB_ICON.wait
+    li.querySelector('.pub-msg').textContent = ''
+  })
+  document.getElementById('pub-result').innerHTML = ''
+}
+
+// SSE の publish イベント（段階の進行）を反映する
+function onPublishEvent(ev) {
+  if (ev.status === 'error') finishPubProgress('error', '失敗しました')
+  else if (ev.percent !== undefined) {
+    const stageLabel = PUB_STAGE_LABEL[ev.stage] || ''
+    setPubProgress(ev.percent, ev.next, ev.status === 'running' && ev.message ? ev.message : stageLabel)
+  }
+  const li = document.querySelector(`#pub-stages li[data-stage="${ev.stage}"]`)
+  if (!li) return
+  li.className = ev.status
+  li.querySelector('.pub-ico').textContent = PUB_ICON[ev.status] || PUB_ICON.wait
+  if (ev.status === 'error') li.querySelector('.pub-msg').textContent = pubExplain(ev.message).title
+  else if (ev.status === 'done') li.querySelector('.pub-msg').textContent = ev.message ?? ''
+  else if (ev.message !== undefined) li.querySelector('.pub-msg').textContent = ev.message
+}
+
+function renderPreflight(res) {
+  const mark = { ok: '✓', warn: '⚠', error: '✗' }
+  document.getElementById('pub-checks').innerHTML = res.checks.map(c => {
+    const fix = c.status === 'error' && c.fix && PUB_FIX[c.fix]
+      ? ` <a href="#" class="pub-fix" onclick="${PUB_FIX[c.fix].run};return false;">${PUB_FIX[c.fix].label}</a>` : ''
+    return `<div class="pub-check ${c.status}"><span class="pub-mark">${mark[c.status]}</span><b>${pubEsc(c.label)}</b><span class="pub-detail">${pubEsc(c.detail)}</span>${fix}</div>`
+  }).join('')
+  publishCanRun = !!res.canPublish
+  applyPublishButtonState()
+}
+
+async function loadPublishLast() {
+  const el = document.getElementById('pub-last')
+  if (!el) return
+  try {
+    const r = await fetch('/api/git/log')
+    if (!r.ok) { el.textContent = ''; return }
+    const logs = await r.json()
+    el.textContent = logs.length
+      ? `最後に公開: ${new Date(logs[0].date).toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' })}（${logs[0].hash}）`
+      : ''
+  } catch { el.textContent = '' }
+}
+
+async function loadPublishPage() {
+  const box = document.getElementById('pub-checks')
+  if (!box) return
+  const hadChecks = !!box.querySelector('.pub-check')
+  const noteEl = document.getElementById('pub-recheck-note')
+  if (noteEl) noteEl.textContent = ''
+  if (!hadChecks) box.textContent = '確認しています…'   // 前の結果があるうちは、そのまま残す
+  const lastEl = document.getElementById('pub-last')
+  try {
+    const r = await fetch('/api/publish/preflight')
+    if (r.status === 409) {
+      // 公開・取り込みの実行中。前のチェック結果を残し、エラー扱いにはしない
+      const b = await r.clone().json().catch(() => null)
+      if (b && b.busy) {
+        applyPublishButtonState()
+        if (noteEl) noteEl.textContent = '実行中のため再チェックはあとで'
+        if (!hadChecks) box.textContent = '実行中のため、チェックはあとで行います。'
+        return
+      }
+    }
+    if (!r.ok) throw new Error(await readError(r))
+    const res = await r.json()
+    renderPreflight(res)
+    if ((res.checks || []).some(c => c.id === 'repo' && c.status === 'ok')) loadPublishLast()
+    else if (lastEl) lastEl.textContent = ''
+  } catch (e) {
+    box.innerHTML = '<div class="pub-check error"><span class="pub-mark">✗</span>チェックに失敗しました: ' + pubEsc(String(e)) + '</div>'
+    publishCanRun = false
+    applyPublishButtonState()
+    if (lastEl) lastEl.textContent = ''
+  }
+}
+
+function renderPublishResult(status, body) {
+  const box = document.getElementById('pub-result')
+  if (body && body.ok) {
+    const v = body.verify || {}
+    const cls = v.state === 'match' ? 'ok' : 'warn'
+    const title = v.state === 'match' ? '✓ 公開できました。GitHub の公開版と一致しています。' : '✓ 公開できました。' + (v.detail || '')
+    box.innerHTML = `<div class="pub-result ${cls}"><div class="pub-result-title">${pubEsc(title)}</div>
+      <div class="pub-result-hint">ランチャーに反映されるまで、最大5分ほどかかることがあります。</div></div>`
+    return
+  }
+  const raw = (body && body.error) || ('HTTP ' + status)
+  const info = body && body.blocked ? { title: 'まだ公開できません', hint: pubEsc(raw) } : pubExplain(raw)
+  const where = body && body.stage ? `<div class="pub-result-where">止まった段階: ${pubEsc(PUB_STAGE_LABEL[body.stage] || body.stage)}</div>` : ''
+  let extra = ''
+  if (body && body.recovered) extra = '<div class="pub-result-hint">途中で止まりましたが、公開データは元に戻しました。</div>'
+  if (body && body.recoveryFailed) extra = '<div class="pub-result-hint pub-strong">公開用の distribution.json が GitHub に無い可能性があります。もう一度「公開する」を押してください。</div>'
+  box.innerHTML = `<div class="pub-result error"><div class="pub-result-title">✗ ${pubEsc(info.title)}</div>${where}
+    <div class="pub-result-hint">💡 ${info.hint}</div>${extra}
+    <div style="margin-top:6px"><a href="#" class="pub-fix" onclick="toggleLogPanel();return false;">詳しいログを見る</a></div></div>`
+}
+
+async function runPublish() {
+  if (!publishCanRun || cmdRunning || pubBusy) return
+  resetPublishStages()
+  pubBusy = true
+  applyPublishButtonState()
+  let status = 0
+  let body = null
+  try {
+    const r = await fetch('/api/publish', { method: 'POST' })
+    status = r.status
+    body = await r.json().catch(() => ({}))
+  } catch (e) { body = { ok: false, error: String(e) } }
+  finally { pubBusy = false }
+  if (body && body.ok) finishPubProgress('done', '公開できました')
+  else finishPubProgress('error', '失敗しました')
+  renderPublishResult(status, body)
+  loadPublishPage()
+}
+
+async function runPullLatest(force = false) {
+  if (pubBusy) return
+  const box = document.getElementById('pub-result')
+  box.innerHTML = ''
+  resetPubProgress()
+  // 押した瞬間に無効にして二重送信を防ぐ。応答が来たら（失敗でも）戻す。
+  pubBusy = true
+  applyPublishButtonState()
+  let r, d
+  try {
+    r = await fetch('/api/publish/pull', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force }) })
+    d = (await r.json()) || {}
+  } catch (e) {
+    const info = pubExplain(String(e))
+    box.innerHTML = `<div class="pub-result error"><div class="pub-result-title">✗ ${pubEsc(info.title)}</div><div class="pub-result-hint">💡 ${info.hint}</div></div>`
+    finishPubProgress('error', '失敗しました')
+    loadPublishPage()
+    return
+  } finally {
+    pubBusy = false
+    applyPublishButtonState()
+  }
+  if (d.needsConfirm || d.pending) resetPubProgress()   // 取り込みは始まっていない（確認待ち／取り込むものなし）
+  if (d.needsConfirm && d.diverged) {
+    const a = Number(d.diverged.ahead) || 0
+    const b = Number(d.diverged.behind) || 0
+    const changes = d.changes || []
+    const list = changes.slice(0, 8).join('\n')
+    const more = changes.length > 8 ? `\n…ほか ${changes.length - 8} 件` : ''
+    const files = changes.length > 0 ? `\n\n置き換わるファイル（${changes.length} 件）:\n${list}${more}` : ''
+    if (confirm(`送信できていない公開（${a}件）があり、GitHub にも新しい更新（${b}件）があります。続けると、送信できていない公開を捨てて GitHub の最新に置き換えます。その公開に含まれていた手元の編集は失われ、やり直しになります。${files}\n\nそれでも置き換えますか？`)) return runPullLatest(true)
+    return
+  }
+  if (d.needsConfirm) {
+    const changes = d.changes || []
+    const list = changes.slice(0, 8).join('\n')
+    const more = changes.length > 8 ? `\n…ほか ${changes.length - 8} 件` : ''
+    if (confirm(`手元の未公開の変更が上書きされます（${changes.length} 件）。\n\n${list}${more}\n\nそれでも最新を取り込みますか？`)) return runPullLatest(true)
+    return
+  }
+  if (d.ok) {
+    finishPubProgress('done', '取り込めました')
+    const title = d.pending ? '⚠ 取り込む更新はありません' : '✓ 最新を取り込みました'
+    box.innerHTML = `<div class="pub-result ${d.pending ? 'warn' : 'ok'}"><div class="pub-result-title">${title}</div><div class="pub-result-hint">${pubEsc(d.message || '')}</div></div>`
+  } else {
+    finishPubProgress('error', '失敗しました')
+    const info = pubExplain(d.error || ('HTTP ' + r.status))
+    box.innerHTML = `<div class="pub-result error"><div class="pub-result-title">✗ ${pubEsc(info.title)}</div><div class="pub-result-hint">💡 ${info.hint}</div></div>`
+  }
+  loadPublishPage()
 }
 
 async function gitRemoveDistribution() {
@@ -2198,6 +2673,44 @@ function setupTabDrops() {
     // drop はタブでは受けない（セクション側で移動を処理する）
   })
 }
+
+// --- ドラッグ中の自動スクロール ---
+// ファイルをドラッグして一覧の上端・下端に近づけると、その方向へスクロールする（近いほど速い）
+let dragScrollSpeed = 0
+let dragScrollRaf = 0
+let dragScrollTimer = 0
+
+function dragScrollSpeedFor(y, top, bottom, edge = 80, max = 28) {
+  if (y < top + edge) return -Math.ceil(max * Math.min(1, (top + edge - y) / edge))
+  if (y > bottom - edge) return Math.ceil(max * Math.min(1, (y - (bottom - edge)) / edge))
+  return 0
+}
+
+function stopDragScroll() {
+  dragScrollSpeed = 0
+  if (dragScrollRaf) { cancelAnimationFrame(dragScrollRaf); dragScrollRaf = 0 }
+  clearTimeout(dragScrollTimer)
+}
+
+function dragScrollTick() {
+  const el = document.querySelector('.detail-tab-content.active')
+  if (!el || dragScrollSpeed === 0) { dragScrollRaf = 0; return }
+  el.scrollTop += dragScrollSpeed
+  dragScrollRaf = requestAnimationFrame(dragScrollTick)
+}
+
+document.addEventListener('dragover', (e) => {
+  const el = document.querySelector('.detail-tab-content.active')
+  if (!el || el.offsetParent === null) { stopDragScroll(); return }
+  const rect = el.getBoundingClientRect()
+  const inside = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top - 40 && e.clientY <= rect.bottom + 40
+  dragScrollSpeed = inside ? dragScrollSpeedFor(e.clientY, rect.top, rect.bottom) : 0
+  clearTimeout(dragScrollTimer)
+  dragScrollTimer = setTimeout(stopDragScroll, 200)   // dragover が来なくなったら止める
+  if (dragScrollSpeed !== 0 && !dragScrollRaf) dragScrollRaf = requestAnimationFrame(dragScrollTick)
+})
+document.addEventListener('drop', stopDragScroll)
+document.addEventListener('dragend', stopDragScroll)
 
 // --- 設定保存 ---
 async function saveServerMeta() {
@@ -2629,7 +3142,7 @@ async function runFabricMcVersions() {
     tag.style.cssText = 'background:var(--surface2);border:1px solid #445;border-radius:4px;padding:2px 8px;font-size:0.78rem;font-family:Consolas,monospace;cursor:pointer;'
     tag.title = 'クリックでサーバー生成のバージョン欄にコピー'
     tag.onclick = () => {
-      document.getElementById('srv-version').value = ver
+      selectGenServerMc('fabric', ver)
       showPage('gen-server')
     }
     container.appendChild(tag)
@@ -2756,6 +3269,7 @@ document.addEventListener('click', (e) => {
 
 loadConfig()
 setupTabDrops()
+loadPublishPage()
 
 if (window.electronAPI) {
   window.electronAPI.getVersion().then(v => {

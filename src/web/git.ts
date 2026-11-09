@@ -1,4 +1,4 @@
-import { simpleGit, SimpleGit, StatusResult } from 'simple-git'
+import { simpleGit, SimpleGit, StatusResult, CheckRepoActions } from 'simple-git'
 import { existsSync, cpSync, unlinkSync, rmSync, readdirSync, statSync } from 'fs'
 import { resolve as resolvePath, join } from 'path'
 import { spawn } from 'child_process'
@@ -97,7 +97,7 @@ export async function checkGitLink(): Promise<GitLinkStatus> {
 }
 
 // ROOT から git リポジトリへコピーするターゲット
-const SYNC_TARGETS = ['modpacks', 'repo', 'servers', 'meta']
+export const SYNC_TARGETS = ['modpacks', 'repo', 'servers', 'meta']
 const SYNC_FILES = ['distribution.json']
 
 // ロックに強い削除（Windows で ENOTEMPTY/EBUSY が出た時にリトライする）
@@ -233,7 +233,13 @@ export async function gitCommitPush(repoPath: string, message: string, branch: s
     await git.add('.')
     const commit = await git.commit(message)
     if (commit.summary.changes === 0 && !commit.commit) {
-        return '変更なし。コミットするものがありません。'
+        // 新しい変更は無い。ただし前回 push に失敗したコミットが残っていれば送信する。
+        const status = await git.status()
+        if (status.ahead === 0) {
+            return '変更なし。コミットするものがありません。'
+        }
+        await git.push('origin', branch)
+        return `未送信のコミット ${status.ahead} 件を送信しました。`
     }
     await git.push('origin', branch)
     return `コミット＆プッシュ完了。(${commit.commit})`
@@ -261,6 +267,65 @@ export async function removeDistributionAndCommit(repoPath: string, branch: stri
     const commit = await git.commit(`Remove ${fileName}`)
     await git.push('origin', branch)
     return `${fileName} を削除してコミット＆プッシュしました。(${commit.commit})`
+}
+
+// 公開用フォルダが使える Git リポジトリか（リポジトリ直下であること・origin があること）を調べる
+export async function getRepoFacts(repoPath: string): Promise<{ isRepo: boolean; hasOrigin: boolean }> {
+    try {
+        const git = simpleGit(repoPath)
+        const isRepo = await git.checkIsRepo(CheckRepoActions.IS_REPO_ROOT)
+        if (!isRepo) return { isRepo: false, hasOrigin: false }
+        const remotes = await git.getRemotes(false)
+        return { isRepo: true, hasOrigin: remotes.some(r => r.name === 'origin') }
+    } catch {
+        return { isRepo: false, hasOrigin: false }
+    }
+}
+
+// fetch して、GitHub より何コミット遅れているかを返す。失敗（通信不可・タイムアウト等）は error で返す。
+export async function fetchBehind(repoPath: string, timeoutMs = 20000): Promise<{ behind: number } | { error: string }> {
+    try {
+        const git = simpleGit({ baseDir: repoPath, timeout: { block: timeoutMs } })
+        await git.fetch()
+        const status = await git.status()
+        return { behind: status.behind }
+    } catch (e) {
+        return { error: String(e) }
+    }
+}
+
+// ROOT の distribution.json を公開用フォルダへコピーする（復旧用）。コピーしたら true
+export function copyDistributionToRepo(rootPath: string, repoPath: string, fileName = 'distribution.json'): boolean {
+    const src = join(resolvePath(rootPath), fileName)
+    if (!existsSync(src)) return false
+    cpSync(src, join(resolvePath(repoPath), fileName), { force: true })
+    return true
+}
+
+// fetch して、未送信のコミット数（ahead）と GitHub の新しい更新数（behind）を返す。失敗は error で返す。
+export async function fetchAheadBehind(repoPath: string, timeoutMs = 20000): Promise<{ ahead: number; behind: number } | { error: string }> {
+    try {
+        const git = simpleGit({ baseDir: repoPath, timeout: { block: timeoutMs } })
+        await git.fetch()
+        const status = await git.status()
+        return { ahead: status.ahead, behind: status.behind }
+    } catch (e) {
+        return { error: String(e) }
+    }
+}
+
+// 送信できていない手元のコミットを捨てて、GitHub（origin/<branch>）の内容に置き換える。
+// 手元の未コミット変更も消えるので、呼ぶ前に isRepoDirty で確認すること。
+export async function discardLocalCommits(repoPath: string, branch: string, timeoutMs = 20000): Promise<void> {
+    const git = simpleGit({ baseDir: repoPath, timeout: { block: timeoutMs } })
+    await git.fetch()
+    await git.raw(['reset', '--hard', `origin/${branch}`])
+}
+
+// 公開用フォルダに未コミットの変更（ステージ済み・変更・削除・名前変更・競合・未追跡）があるか
+export async function isRepoDirty(repoPath: string): Promise<boolean> {
+    const status = await simpleGit(repoPath).status()
+    return !status.isClean()
 }
 
 export async function getLog(repoPath: string, count = 10): Promise<Array<{ hash: string; date: string; message: string; author: string }>> {

@@ -102,20 +102,19 @@ export async function unexternalizeFile(serverDir: string, category: string, rel
 
 const MOD_CATEGORIES = ['forgemods', 'fabricmods', 'files']
 
-// rootPath/servers/<srv>/<category>/** を走査し、閾値超の .jar（.link.json が無いもの）を外部化
-export async function scanAndExternalize(
-    rootPath: string, assetRepo: string, releaseTag: string, threshold: number
-): Promise<string[]> {
-    const done: string[] = []
+// rootPath/servers/<srv>/<category>/** を走査し、閾値超の .jar（.link.json が無いもの）を列挙する（何も変更しない）
+interface OversizedItem { srv: string; serverDir: string; cat: string; relPath: string }
+
+function findOversized(rootPath: string, threshold: number): OversizedItem[] {
+    const items: OversizedItem[] = []
     const serversDir = join(resolvePath(rootPath), 'servers')
-    if (!existsSync(serversDir)) return done
+    if (!existsSync(serversDir)) return items
     for (const srv of readdirSync(serversDir)) {
         const serverDir = join(serversDir, srv)
         if (!statSync(serverDir).isDirectory()) continue
         for (const cat of MOD_CATEGORIES) {
             const catDir = join(serverDir, cat)
             if (!existsSync(catDir)) continue
-            const pending: string[] = []
             const walk = (dir: string): void => {
                 for (const entry of readdirSync(dir)) {
                     const p = join(dir, entry)
@@ -124,15 +123,28 @@ export async function scanAndExternalize(
                     if (!/\.jar$/i.test(entry)) continue
                     if (existsSync(`${p}.link.json`)) continue    // 既に外部化/リンク済み
                     if (st.size <= threshold) continue             // 閾値以下
-                    pending.push(p.slice(catDir.length + 1).replace(/\\/g, '/'))
+                    items.push({ srv, serverDir, cat, relPath: p.slice(catDir.length + 1).replace(/\\/g, '/') })
                 }
             }
             walk(catDir)
-            for (const relPath of pending) {
-                await externalizeFile(serverDir, srv, cat, relPath, assetRepo, releaseTag)
-                done.push(`${srv}/${cat}/${relPath}`)
-            }
         }
+    }
+    return items
+}
+
+// 閾値超ファイルの一覧（"<server>/<category>/<相対パス>"）。準備チェック用で、何も変更しない。
+export function listOversized(rootPath: string, threshold: number): string[] {
+    return findOversized(rootPath, threshold).map(i => `${i.srv}/${i.cat}/${i.relPath}`)
+}
+
+// 閾値超の .jar を外部化する
+export async function scanAndExternalize(
+    rootPath: string, assetRepo: string, releaseTag: string, threshold: number
+): Promise<string[]> {
+    const done: string[] = []
+    for (const item of findOversized(rootPath, threshold)) {
+        await externalizeFile(item.serverDir, item.srv, item.cat, item.relPath, assetRepo, releaseTag)
+        done.push(`${item.srv}/${item.cat}/${item.relPath}`)
     }
     return done
 }

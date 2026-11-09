@@ -11,6 +11,8 @@ import dotenv from 'dotenv'
 import { sseManager } from './SseLogTransport.js'
 import { getGitStatus, syncToRepo, syncFromRepo, gitFetch, gitPull, gitCommitPush, getLog, checkGitLink, removeDistributionAndCommit } from './git.js'
 import { externalizeFile, unexternalizeFile, scanAndExternalize } from './externalize.js'
+import { preflight, runPublish, runPull, withLock, isBusy, BusyError, PublishContext, PublishDeps } from './publish.js'
+import { VersionCatalog, registerVersionRoutes } from './mcVersions.js'
 import {
     cmdInitRoot,
     cmdGenerateServer,
@@ -338,6 +340,7 @@ app.post('/api/recommended-forge', async (req, res) => {
 app.post('/api/latest-fabric', async (_req, res) => { await versionQuery(res, cmdLatestFabric) })
 app.post('/api/stable-fabric', async (_req, res) => { await versionQuery(res, cmdStableFabric) })
 app.post('/api/fabric-mc-versions', async (_req, res) => { await versionQuery(res, cmdFabricSupportedMcVersions) })
+registerVersionRoutes(app, new VersionCatalog())
 
 // --- Servers list ---
 app.get('/api/servers', async (_req, res) => {
@@ -901,35 +904,88 @@ app.post('/api/git/remove-distribution', async (_req, res) => {
     catch (e) { res.status(500).json({ error: String(e) }) }
 })
 
-// ワンクリック配信（完全リフレッシュ）: 生成→置換→コミット→削除コミット→ROOTへ置換→生成→置換→コミット
-app.post('/api/git/full-republish', async (_req, res) => {
+// ===== 公開ページ =====
+
+function buildPublishContext(): PublishContext {
     const env = getEnvConfig()
-    const asset = getAssetConfig()
-    const { repoPath, branch, commitMsg } = getGitConfig()
-    if (!env.ROOT) { res.status(400).json({ error: 'ROOTが未設定です' }); return }
-    if (!repoPath || !existsSync(repoPath)) { res.status(400).json({ error: 'リポジトリパスが未設定または存在しません' }); return }
-    const log = (m: string) => sseManager.broadcast({ type: 'log', level: 'info', message: m })
-    const root = resolvePath(env.ROOT)
-    const gen = async (): Promise<void> => {
-        const ext = await scanAndExternalize(root, asset.repo, asset.tag, asset.threshold)
-        if (ext.length) log(`外部リリース化: ${ext.join(', ')}`)
-        await cmdGenerateDistro(getEnvConfig(), 'distribution', false, false, false)
+    const g = getGitConfig()
+    const a = getAssetConfig()
+    return {
+        root: env.ROOT ? resolvePath(env.ROOT) : '',
+        repoPath: g.repoPath,
+        branch: g.branch,
+        commitMsg: g.commitMsg,
+        baseUrl: env.BASE_URL,
+        asset: { repo: a.repo, tag: a.tag, threshold: a.threshold }
     }
-    sseManager.broadcast({ type: 'start' })
+}
+
+function makePublishDeps(ctx: PublishContext): PublishDeps {
+    return {
+        generate: async () => {
+            const ext = await scanAndExternalize(ctx.root, ctx.asset.repo, ctx.asset.tag, ctx.asset.threshold)
+            if (ext.length) sseManager.broadcast({ type: 'log', level: 'info', message: `外部リリース化: ${ext.join(', ')}` })
+            await cmdGenerateDistro(getEnvConfig(), 'distribution', false, false, false)
+        },
+        fetchText: async (url) => {
+            const res = await fetch(url, { headers: { 'Cache-Control': 'no-cache' } })
+            return { status: res.status, text: await res.text() }
+        }
+    }
+}
+
+// 公開できる状態かの確認
+app.get('/api/publish/preflight', async (_req, res) => {
+    // 公開・取り込みの実行中は git を触らない（index.lock の衝突や中途半端な状態の読み取りを避ける）
+    if (isBusy()) { res.status(409).json({ ok: false, busy: true, error: '別の公開処理が実行中です。' }); return }
+    try { res.json(await preflight(buildPublishContext())) }
+    catch (e) { res.status(500).json({ error: String(e) }) }
+})
+
+// 公開する（生成 → 反映 → 送信 → 入れ直し → 確認）。進行は SSE の publish イベントで通知する。
+app.post('/api/publish', async (_req, res) => {
     try {
-        log('① Distribution 生成...'); await gen()
-        log('② ROOT → リポジトリへ置き換え...'); await syncToRepo(root, repoPath)
-        log('③ コミット＆プッシュ...'); log(await gitCommitPush(repoPath, commitMsg, branch))
-        log('④ distribution.json を削除してコミット...'); log(await removeDistributionAndCommit(repoPath, branch))
-        log('⑤ リポジトリ → ROOT へ置き換え...'); await syncFromRepo(root, repoPath)
-        log('⑥ Distribution 生成...'); await gen()
-        log('⑦ ROOT → リポジトリへ置き換え...'); await syncToRepo(root, repoPath)
-        log('⑧ コミット＆プッシュ...'); log(await gitCommitPush(repoPath, commitMsg, branch))
-        sseManager.broadcast({ type: 'done', success: true })
-        res.json({ ok: true })
+        const result = await withLock(async () => {
+            const ctx = buildPublishContext()
+            const pre = await preflight(ctx)
+            if (!pre.canPublish) {
+                const first = pre.checks.find(c => c.status === 'error')
+                return { blocked: true as const, error: first ? first.detail : '公開できる状態ではありません。', checks: pre.checks }
+            }
+            sseManager.broadcast({ type: 'start' })
+            const r = await runPublish(ctx, makePublishDeps(ctx), (ev) => sseManager.broadcast({ type: 'publish', ...ev }))
+            sseManager.broadcast({ type: 'done', success: r.ok, error: r.ok ? undefined : r.error })
+            return r
+        })
+        if ('blocked' in result) {
+            res.status(400).json({ ok: false, blocked: true, error: result.error, checks: result.checks })
+            return
+        }
+        res.status(result.ok ? 200 : 500).json(result)
     } catch (e) {
-        sseManager.broadcast({ type: 'done', success: false, error: String(e) })
-        res.status(500).json({ error: String(e) })
+        if (e instanceof BusyError) { res.status(409).json({ ok: false, error: e.message }); return }
+        res.status(500).json({ ok: false, error: String(e) })
+    }
+})
+
+// 最新を取り込む（GitHub → 公開用フォルダ → ROOT）。手元に未公開の変更があれば確認を求める。
+app.post('/api/publish/pull', async (req, res) => {
+    const force = Boolean((req.body as { force?: boolean } | undefined)?.force)
+    try {
+        const r = await withLock(async () => {
+            let started = false
+            const result = await runPull(buildPublishContext(), force, () => {
+                started = true
+                sseManager.broadcast({ type: 'start' })
+            }, (percent, next, label) => sseManager.broadcast({ type: 'progress', percent, next, label }))
+            if (started) sseManager.broadcast({ type: 'done', success: result.ok, error: result.ok ? undefined : ('error' in result ? result.error : undefined) })
+            return result
+        })
+        const needsConfirm = !r.ok && r.needsConfirm === true
+        res.status(r.ok || needsConfirm ? 200 : 500).json(r)
+    } catch (e) {
+        if (e instanceof BusyError) { res.status(409).json({ ok: false, error: e.message }); return }
+        res.status(500).json({ ok: false, error: String(e) })
     }
 })
 
